@@ -1,18 +1,17 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClientProvider } from '@tanstack/react-query';
+import * as Notifications from 'expo-notifications';
 
 import { queryClient } from '@/lib/query-client';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { homeRouteForRole } from '@/lib/auth/roles';
+import { initPushNotifications, unregisterPushToken } from '@/lib/notifications';
 
-// 인증 가드: 인증 상태와 현재 라우트 그룹을 비교해 리다이렉트.
-//  - 미인증 + 보호 구역  => /login
-//  - 인증됨 + 로그인 화면 => 역할별 홈
 function useAuthGuard() {
   const status = useAuthStore((s) => s.status);
   const session = useAuthStore((s) => s.session);
@@ -20,11 +19,9 @@ function useAuthGuard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'loading') return; // 부트스트랩 완료 전 대기
-
-    const group = segments[0]; // (tabs) | (home) | login | undefined
+    if (status === 'loading') return;
+    const group = segments[0];
     const inAuthScreen = group === 'login';
-
     if (status === 'unauthenticated' && !inAuthScreen) {
       router.replace('/login');
     } else if (status === 'authenticated' && (inAuthScreen || group === undefined)) {
@@ -37,7 +34,6 @@ function useAuthGuard() {
 
 function RootNavigator() {
   const status = useAuthGuard();
-
   if (status === 'loading') {
     return (
       <View style={styles.splash}>
@@ -45,7 +41,6 @@ function RootNavigator() {
       </View>
     );
   }
-
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
@@ -56,12 +51,40 @@ function RootNavigator() {
   );
 }
 
+type NotifSub = { remove(): void };
+
 export default function RootLayout() {
   const bootstrap = useAuthStore((s) => s.bootstrap);
+  const status = useAuthStore((s) => s.status);
+  const notifRef = useRef<NotifSub | null>(null);
+  const responseRef = useRef<NotifSub | null>(null);
+  const prevStatusRef = useRef(status);
 
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    void initPushNotifications();
+    notifRef.current = Notifications.addNotificationReceivedListener(() => {
+      void queryClient.invalidateQueries({ queryKey: ['alerts'] });
+    });
+    responseRef.current = Notifications.addNotificationResponseReceivedListener((_r) => {
+      void queryClient.invalidateQueries({ queryKey: ['alerts'] });
+    });
+    return () => {
+      notifRef.current?.remove();
+      responseRef.current?.remove();
+    };
+  }, [status]);
+
+  useEffect(() => {
+    if (prevStatusRef.current === 'authenticated' && status === 'unauthenticated') {
+      void unregisterPushToken();
+    }
+    prevStatusRef.current = status;
+  }, [status]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -76,10 +99,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
+  splash: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
 });

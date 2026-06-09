@@ -1,122 +1,177 @@
-/**
- * 알림 탭 - 실시간 알림 및 긴급 알람
- */
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { formatDistanceToNow } from 'date-fns';
+import { ko } from 'date-fns/locale';
+import { useAlerts, useAcknowledgeAlert, type AlertItem, type AlertSeverity } from '@/lib/hooks/useAlerts';
+import EmergencyAlertModal from '@/components/EmergencyAlertModal';
 
-const ALERTS = [
-  {
-    id: '1',
-    type: 'FALL_DETECTED',
-    title: '낙상 감지',
-    resident: '김순자',
-    room: '102호',
-    time: '10분 전',
-    severity: 'Critical',
-    status: 'New',
-  },
-  {
-    id: '2',
-    type: 'VITAL_CRISIS',
-    title: '바이탈 위기',
-    resident: '이영철',
-    room: '205호',
-    time: '32분 전',
-    severity: 'High',
-    status: 'Acknowledged',
-  },
-  {
-    id: '3',
-    type: 'MEDICATION_MISSED',
-    title: '복약 미실시',
-    resident: '박정희',
-    room: '301호',
-    time: '1시간 전',
-    severity: 'Medium',
-    status: 'New',
-  },
-];
-
-const SEVERITY_CONFIG = {
-  Critical: { bg: '#FEF2F2', border: '#FCA5A5', text: '#DC2626', label: '위급' },
-  High: { bg: '#FFF7ED', border: '#FDBA74', text: '#EA580C', label: '높음' },
-  Medium: { bg: '#FFFBEB', border: '#FCD34D', text: '#D97706', label: '보통' },
-  Low: { bg: '#F0FDF4', border: '#86EFAC', text: '#16A34A', label: '낮음' },
+type SeverityConfig = { bg: string; border: string; text: string; label: string };
+const SEV_CFG: Record<AlertSeverity, SeverityConfig> = {
+  Critical: { bg: '#FEF2F2', border: '#FCA5A5', text: '#DC2626', label: 'wg' },
+  High: { bg: '#FFF7ED', border: '#FDBA74', text: '#EA580C', label: 'nf' },
+  Medium: { bg: '#FFFBEB', border: '#FCD34D', text: '#D97706', label: 'ef' },
+  Low: { bg: '#F0FDF4', border: '#86EFAC', text: '#16A34A', label: 'ld' },
 };
 
-export default function AlertsScreen() {
-  const newAlerts = ALERTS.filter((a) => a.status === 'New');
-  
-  return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        {newAlerts.length > 0 && (
-          <View style={styles.urgentBanner}>
-            <Text style={styles.urgentText}>⚠️ 미처리 알림 {newAlerts.length}건</Text>
-          </View>
-        )}
+const SEV_LABELS: Record<AlertSeverity, string> = {
+  Critical: '위급', High: '높음', Medium: '보통', Low: '낮음',
+};
 
-        <Text style={styles.sectionTitle}>전체 알림</Text>
-        {ALERTS.map((alert) => {
-          const cfg = SEVERITY_CONFIG[alert.severity as keyof typeof SEVERITY_CONFIG];
-          return (
-            <TouchableOpacity
-              key={alert.id}
-              style={[styles.alertCard, { backgroundColor: cfg.bg, borderColor: cfg.border }]}
-            >
-              <View style={styles.alertHeader}>
-                <View style={[styles.severityBadge, { backgroundColor: cfg.text }]}>
-                  <Text style={styles.severityText}>{cfg.label}</Text>
-                </View>
-                <Text style={styles.alertTime}>{alert.time}</Text>
-              </View>
-              <Text style={styles.alertTitle}>{alert.title}</Text>
-              <Text style={styles.alertResident}>{alert.resident} · {alert.room}</Text>
-              
-              {alert.status === 'New' && (
-                <TouchableOpacity style={styles.ackButton}>
-                  <Text style={styles.ackButtonText}>확인했습니다</Text>
-                </TouchableOpacity>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </SafeAreaView>
+const TYPE_LABELS: Record<string, string> = {
+  FALL_DETECTED: '낙상 감지',
+  VITAL_CRISIS: '바이탈 위기',
+  EXIT_ZONE: '구역 이탈',
+  MEDICATION_MISSED: '복약 미실시',
+  NO_MOVEMENT: '무움직임',
+  STRESS_HIGH: '스트레스 높음',
+  DEVICE_OFFLINE: '기기 오프라인',
+};
+
+function relTime(iso: string): string {
+  try { return formatDistanceToNow(new Date(iso), { addSuffix: true, locale: ko }); }
+  catch { return iso; }
+}
+
+type FilterTab = 'all' | 'new' | 'critical';
+
+interface CardProps { item: AlertItem; onAck: (id: string) => void; acking: boolean; }
+
+function AlertCard({ item, onAck, acking }: CardProps) {
+  const cfg = SEV_CFG[item.severity];
+  const title = TYPE_LABELS[item.type] ?? item.title;
+  const isNew = item.status === 'new';
+  return (
+    <View style={[s.card, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
+      <View style={s.row}>
+        <View style={[s.badge, { backgroundColor: cfg.text }]}>
+          <Text style={s.badgeTxt}>{SEV_LABELS[item.severity]}</Text>
+        </View>
+        <Text style={s.timeT}>{relTime(item.createdAt)}</Text>
+      </View>
+      <Text style={s.titleT}>{title}</Text>
+      <Text style={s.subT}>{item.residentName} / {item.roomName}</Text>
+      {!!item.description && <Text style={s.descT}>{item.description}</Text>}
+      {isNew && (
+        <TouchableOpacity style={[s.ackBtn, acking && s.ackBtnOff]} onPress={() => onAck(item.id)} disabled={acking}>
+          {acking ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.ackTxt}>확인했습니다</Text>}
+        </TouchableOpacity>
+      )}
+      {item.status === 'acknowledged' && <Text style={s.doneT}>확인됨</Text>}
+      {item.status === 'resolved' && <Text style={[s.doneT, { color: '#16A34A' }]}>해결됨</Text>}
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
+export default function AlertsScreen() {
+  const [filter, setFilter] = useState<FilterTab>('all');
+  const [emergency, setEmergency] = useState<AlertItem | null>(null);
+  const [ackingId, setAckingId] = useState<string | null>(null);
+  const shownRef = useRef(new Set<string>());
+
+  const apiOpts = filter === 'new' ? { status: 'new' as const }
+    : filter === 'critical' ? { severity: 'Critical' as const }
+    : undefined;
+
+  const { alerts, isLoading, isError, refetch, isFetching } = useAlerts(apiOpts);
+  const ackMutation = useAcknowledgeAlert();
+
+  useEffect(() => {
+    const found = alerts.find(
+      (a) => a.severity === 'Critical' && a.status === 'new' && !shownRef.current.has(a.id),
+    );
+    if (found) { shownRef.current.add(found.id); setEmergency(found); }
+  }, [alerts]);
+
+  const handleAck = useCallback(async (id: string) => {
+    if (emergency?.id === id) setEmergency(null);
+    setAckingId(id);
+    try { await ackMutation.mutateAsync(id); } finally { setAckingId(null); }
+  }, [ackMutation, emergency]);
+
+  const handleEmergencyAck = useCallback((id: string) => {
+    setEmergency(null); void handleAck(id);
+  }, [handleAck]);
+
+  const newCount = alerts.filter((a) => a.status === 'new').length;
+  const tabs: { key: FilterTab; label: string }[] = [
+    { key: 'all', label: '전체' },
+    { key: 'new', label: '미처리' },
+    { key: 'critical', label: '위급' },
+  ];
+
+  return (
+    <>
+      <EmergencyAlertModal alert={emergency} onAcknowledge={handleEmergencyAck} />
+      <SafeAreaView style={s.container} edges={['bottom']}>
+        {newCount > 0 && (
+          <View style={s.banner}>
+            <Text style={s.bannerTxt}>미처리 알림 {newCount}건</Text>
+          </View>
+        )}
+        <View style={s.filterRow}>
+          {tabs.map((tab) => (
+            <TouchableOpacity key={tab.key} style={[s.ftab, filter === tab.key && s.ftabOn]} onPress={() => setFilter(tab.key)}>
+              <Text style={[s.ftabTxt, filter === tab.key && s.ftabTxtOn]}>{tab.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <ScrollView
+          contentContainerStyle={s.list}
+          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => void refetch()} tintColor="#1A5276" />}
+        >
+          {isLoading && (
+            <View style={s.center}>
+              <ActivityIndicator size="large" color="#1A5276" />
+              <Text style={s.centerTxt}>알림 불러오는 중...</Text>
+            </View>
+          )}
+          {isError && !isLoading && (
+            <View style={s.center}>
+              <Text style={s.errTxt}>알림을 불러오지 못했습니다</Text>
+              <TouchableOpacity onPress={() => void refetch()} style={s.retryBtn}>
+                <Text style={s.retryTxt}>다시 시도</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {!isLoading && !isError && alerts.length === 0 && (
+            <View style={s.center}><Text style={s.emptyTxt}>알림이 없습니다</Text></View>
+          )}
+          {alerts.map((a) => (
+            <AlertCard key={a.id} item={a} onAck={handleAck} acking={ackingId === a.id} />
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    </>
+  );
+}
+
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-  content: { padding: 16, gap: 12 },
-  urgentBanner: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  urgentText: { color: '#DC2626', fontWeight: '700', fontSize: 15 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  alertCard: {
-    borderRadius: 12,
-    borderWidth: 1.5,
-    padding: 14,
-    gap: 6,
-  },
-  alertHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  severityBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  severityText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  alertTime: { fontSize: 12, color: '#6B7280' },
-  alertTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  alertResident: { fontSize: 13, color: '#6B7280' },
-  ackButton: {
-    marginTop: 8, backgroundColor: '#1A5276',
-    borderRadius: 8, padding: 10, alignItems: 'center',
-    minHeight: 44,
-  },
-  ackButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  banner: { backgroundColor: '#FEE2E2', padding: 12, alignItems: 'center' },
+  bannerTxt: { color: '#DC2626', fontWeight: '700', fontSize: 15 },
+  filterRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  ftab: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6' },
+  ftabOn: { backgroundColor: '#1A5276' },
+  ftabTxt: { fontSize: 13, color: '#6B7280', fontWeight: '600' },
+  ftabTxtOn: { color: '#fff' },
+  list: { padding: 16, gap: 12 },
+  center: { paddingVertical: 60, alignItems: 'center', gap: 12 },
+  centerTxt: { color: '#6B7280', fontSize: 14 },
+  errTxt: { color: '#DC2626', fontSize: 15, fontWeight: '600' },
+  retryBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#1A5276', borderRadius: 8 },
+  retryTxt: { color: '#fff', fontWeight: '600' },
+  emptyTxt: { color: '#9CA3AF', fontSize: 16 },
+  card: { borderRadius: 12, borderWidth: 1.5, padding: 14, gap: 6 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
+  badgeTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  timeT: { fontSize: 12, color: '#6B7280' },
+  titleT: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  subT: { fontSize: 13, color: '#6B7280' },
+  descT: { fontSize: 13, color: '#6B7280', fontStyle: 'italic' },
+  ackBtn: { marginTop: 8, backgroundColor: '#1A5276', borderRadius: 8, padding: 10, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  ackBtnOff: { opacity: 0.6 },
+  ackTxt: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  doneT: { fontSize: 12, color: '#6B7280', fontWeight: '600', marginTop: 4 },
 });
