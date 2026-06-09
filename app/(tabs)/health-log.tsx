@@ -1,73 +1,142 @@
 /**
- * 건강 기록 탭 - 식사 섭취, 체중, 일일 점검
+ * 건강 기록 탭 — GET/POST /api/meals/intake 실데이터
  */
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useCallback } from 'react';
+import {
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  ActivityIndicator, RefreshControl, Alert,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useResidents } from '../../lib/hooks/useResidents';
+import {
+  useMealIntakes, useMealIntakeCreate, cycleIntake,
+  INTAKE_LABEL, INTAKE_COLOR,
+  type MealIntake,
+} from '../../lib/hooks/useMealIntake';
 
-const MEAL_RECORDS = [
-  { name: '김순자', room: '102호', breakfast: 'All', lunch: 'Half', dinner: null },
-  { name: '이영철', room: '205호', breakfast: 'All', lunch: 'All', dinner: null },
-  { name: '박정희', room: '301호', breakfast: 'None', lunch: null, dinner: null },
+const TODAY = new Date().toISOString().slice(0, 10);
+
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'] as const;
+type MealType = typeof MEAL_TYPES[number];
+const MEAL_LABELS: Record<MealType, string> = { breakfast: '조식', lunch: '중식', dinner: '석식' };
+
+const DAILY_CHECKS = [
+  '바이탈 사인 측정',
+  '식사 섭취 기록',
+  '복약 확인',
+  '이동 보조 기록',
+  '위생 케어 완료',
+  '안전 점검',
 ];
 
-const INTAKE_LABELS: Record<string, string> = {
-  All: '전량',
-  Half: '반량',
-  None: '거부',
-};
-
-const INTAKE_COLORS: Record<string, string> = {
-  All: '#16A34A',
-  Half: '#D97706',
-  None: '#DC2626',
-};
-
 export default function HealthLogScreen() {
+  const { data: residentsData, isLoading: loadingResidents } = useResidents({ status: '입소 중' });
+  const {
+    data: intakeData,
+    isLoading: loadingIntake,
+    isRefetching,
+    refetch,
+  } = useMealIntakes({ date: TODAY });
+  const { mutate: createIntake, isPending: isSaving } = useMealIntakeCreate();
+
+  const [checks, setChecks] = useState<boolean[]>(DAILY_CHECKS.map(() => false));
+  // 낙관적 UI: 저장 중인 셀 추적
+  const [savingCell, setSavingCell] = useState<string | null>(null);
+
+  const residents = residentsData?.items ?? [];
+  const intakeItems: MealIntake[] = intakeData?.items ?? [];
+
+  // residentId + mealType → intake 맵
+  const intakeMap = new Map<string, MealIntake>();
+  for (const item of intakeItems) {
+    intakeMap.set(`${item.residentId}:${item.mealType}`, item);
+  }
+
+  const handleMealCell = useCallback(
+    (residentId: string, mealType: MealType) => {
+      if (isSaving) return;
+      const key = `${residentId}:${mealType}`;
+      const current = intakeMap.get(key)?.intakeAmount ?? null;
+      const next = cycleIntake(current);
+      setSavingCell(key);
+      createIntake(
+        { residentId, intakeDate: TODAY, mealType, intakeAmount: next },
+        {
+          onSettled: () => setSavingCell(null),
+          onError: (err) => Alert.alert('저장 실패', err.message),
+        },
+      );
+    },
+    [intakeMap, isSaving, createIntake],
+  );
+
+  const toggleCheck = (i: number) => {
+    setChecks(prev => prev.map((v, idx) => (idx === i ? !v : v)));
+  };
+
+  const isLoading = loadingResidents || loadingIntake;
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />
+        }
+      >
         {/* Meal Intake */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>식사 섭취 기록</Text>
-          <View style={styles.mealTable}>
-            <View style={styles.mealHeader}>
-              <Text style={[styles.mealCell, styles.nameCell, styles.headerText]}>입주자</Text>
-              <Text style={[styles.mealCell, styles.headerText]}>조식</Text>
-              <Text style={[styles.mealCell, styles.headerText]}>중식</Text>
-              <Text style={[styles.mealCell, styles.headerText]}>석식</Text>
-            </View>
-            {MEAL_RECORDS.map((r, i) => (
-              <View key={i} style={styles.mealRow}>
-                <View style={[styles.mealCell, styles.nameCell]}>
-                  <Text style={styles.residentName}>{r.name}</Text>
-                  <Text style={styles.roomText}>{r.room}</Text>
-                </View>
-                <MealCell value={r.breakfast} />
-                <MealCell value={r.lunch} />
-                <MealCell value={r.dinner} />
+          <Text style={styles.sectionTitle}>식사 섭취 기록 — {TODAY}</Text>
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#1A5276" style={{ marginVertical: 24 }} />
+          ) : (
+            <View style={styles.mealTable}>
+              {/* 헤더 */}
+              <View style={styles.mealHeader}>
+                <Text style={[styles.mealCell, styles.nameCell, styles.headerText]}>입주자</Text>
+                {MEAL_TYPES.map(m => (
+                  <Text key={m} style={[styles.mealCell, styles.headerText]}>{MEAL_LABELS[m]}</Text>
+                ))}
               </View>
-            ))}
-          </View>
+              {residents.length === 0 && (
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                  <Text style={{ color: '#9CA3AF' }}>입소 중인 입주자가 없습니다</Text>
+                </View>
+              )}
+              {residents.map(r => (
+                <View key={r.id} style={styles.mealRow}>
+                  <View style={[styles.mealCell, styles.nameCell]}>
+                    <Text style={styles.residentName}>{r.name}</Text>
+                    <Text style={styles.roomText}>{r.room || '미배정'}</Text>
+                  </View>
+                  {MEAL_TYPES.map(mealType => {
+                    const key = `${r.id}:${mealType}`;
+                    const item = intakeMap.get(key);
+                    const isLoading = savingCell === key;
+                    return (
+                      <MealCell
+                        key={mealType}
+                        value={item?.intakeAmount ?? null}
+                        loading={isLoading}
+                        onPress={() => handleMealCell(r.id, mealType)}
+                      />
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Daily Checks */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>일일 점검 체크리스트</Text>
-          {[
-            { label: '바이탈 사인 측정', done: true },
-            { label: '식사 섭취 기록', done: true },
-            { label: '복약 확인', done: false },
-            { label: '이동 보조 기록', done: false },
-            { label: '위생 케어 완료', done: true },
-            { label: '안전 점검', done: false },
-          ].map((item, i) => (
-            <TouchableOpacity key={i} style={styles.checkItem}>
-              <View style={[styles.checkbox, item.done && styles.checkboxDone]}>
-                {item.done && <Text style={styles.checkmark}>✓</Text>}
+          {DAILY_CHECKS.map((item, i) => (
+            <TouchableOpacity key={i} style={styles.checkItem} onPress={() => toggleCheck(i)}>
+              <View style={[styles.checkbox, checks[i] && styles.checkboxDone]}>
+                {checks[i] && <Text style={styles.checkmark}>✓</Text>}
               </View>
-              <Text style={[styles.checkLabel, item.done && styles.checkLabelDone]}>
-                {item.label}
-              </Text>
+              <Text style={[styles.checkLabel, checks[i] && styles.checkLabelDone]}>{item}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -76,20 +145,33 @@ export default function HealthLogScreen() {
   );
 }
 
-function MealCell({ value }: { value: string | null }) {
+function MealCell({
+  value, loading, onPress,
+}: {
+  value: string | null;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  if (loading) {
+    return (
+      <View style={[styles.mealCell, styles.mealCellEmpty]}>
+        <ActivityIndicator size="small" color="#6B7280" />
+      </View>
+    );
+  }
   if (!value) {
     return (
-      <TouchableOpacity style={[styles.mealCell, styles.mealCellEmpty]}>
+      <TouchableOpacity style={[styles.mealCell, styles.mealCellEmpty]} onPress={onPress}>
         <Text style={styles.mealCellEmptyText}>+</Text>
       </TouchableOpacity>
     );
   }
   return (
-    <View style={styles.mealCell}>
-      <Text style={[styles.intakeText, { color: INTAKE_COLORS[value] }]}>
-        {INTAKE_LABELS[value]}
+    <TouchableOpacity style={styles.mealCell} onPress={onPress}>
+      <Text style={[styles.intakeText, { color: INTAKE_COLOR[value] ?? '#6B7280' }]}>
+        {INTAKE_LABEL[value] ?? value}
       </Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -98,10 +180,13 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 24 },
   section: { gap: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  mealTable: { backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden' },
+  mealTable: {
+    backgroundColor: '#fff', borderRadius: 10,
+    borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden',
+  },
   mealHeader: { flexDirection: 'row', backgroundColor: '#F3F4F6', padding: 10 },
   mealRow: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  mealCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  mealCell: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 40 },
   nameCell: { flex: 2, alignItems: 'flex-start' },
   headerText: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
   residentName: { fontSize: 14, fontWeight: '600', color: '#111827' },
@@ -113,13 +198,11 @@ const styles = StyleSheet.create({
   },
   mealCellEmptyText: { fontSize: 18, color: '#9CA3AF' },
   checkItem: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#fff', borderRadius: 8, padding: 12,
-    gap: 12, borderWidth: 1, borderColor: '#E5E7EB', minHeight: 50,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+    borderRadius: 8, padding: 12, gap: 12, borderWidth: 1, borderColor: '#E5E7EB', minHeight: 50,
   },
   checkbox: {
-    width: 24, height: 24, borderRadius: 6,
-    borderWidth: 2, borderColor: '#D1D5DB',
+    width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#D1D5DB',
     alignItems: 'center', justifyContent: 'center',
   },
   checkboxDone: { backgroundColor: '#16A34A', borderColor: '#16A34A' },

@@ -1,101 +1,121 @@
 /**
- * 일일 투두리스트 탭 — 종사자 전용
- * AI 자동생성 + 관리자 지시 업무를 확인하고 체크하여 보고
+ * 일일 투두리스트 탭 — GET/PATCH /api/todos 실데이터
  */
 import { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Alert } from 'react-native';
+import {
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  TextInput, Alert, ActivityIndicator, RefreshControl,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  useTodos, useTodoPatch, toDisplayStatus, toApiStatus, deriveSource,
+  type Todo,
+} from '../../../lib/hooks/useTodos';
 
-// 카테고리 이모지/라벨
 const CATEGORIES: Record<string, { emoji: string; label: string }> = {
-  vital_check: { emoji: '💓', label: '바이탈' },
-  medication: { emoji: '💊', label: '투약' },
-  meal_assist: { emoji: '🍚', label: '식사' },
-  bathing: { emoji: '🚿', label: '목욕' },
-  diaper_change: { emoji: '🧷', label: '기저귀' },
-  position_change: { emoji: '🔄', label: '체위변경' },
-  exercise: { emoji: '🏃', label: '운동' },
-  program: { emoji: '🎨', label: '프로그램' },
-  observation: { emoji: '📝', label: '관찰' },
-  cleaning: { emoji: '🧹', label: '환경정리' },
-  report: { emoji: '📋', label: '인수인계' },
-  guardian_request: { emoji: '📞', label: '보호자' },
-  manager_task: { emoji: '⚡', label: '관리자지시' },
-  other: { emoji: '📌', label: '기타' },
+  vital_check:    { emoji: '💓', label: '바이탈' },
+  medication:     { emoji: '💊', label: '투약' },
+  meal_assist:    { emoji: '🍚', label: '식사' },
+  bathing:        { emoji: '🚿', label: '목욕' },
+  diaper_change:  { emoji: '🧷', label: '기저귀' },
+  position_change:{ emoji: '🔄', label: '체위변경' },
+  exercise:       { emoji: '🏃', label: '운동' },
+  program:        { emoji: '🎨', label: '프로그램' },
+  observation:    { emoji: '📝', label: '관찰' },
+  cleaning:       { emoji: '🧹', label: '환경정리' },
+  report:         { emoji: '📋', label: '인수인계' },
+  guardian_request:{ emoji: '📞', label: '보호자' },
+  manager_task:   { emoji: '⚡', label: '관리자지시' },
+  other:          { emoji: '📌', label: '기타' },
 };
 
-interface TodoItem {
-  id: string;
-  title: string;
-  description?: string;
-  category: string;
-  priority: 'urgent' | 'high' | 'normal' | 'low';
-  source: 'ai_generated' | 'manager_assigned' | 'carryover';
-  residentName?: string;
-  room?: string;
-  scheduledTime?: string;
-  dueTime?: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
-  completionNote?: string;
-}
-
-// Mock 투두 데이터
-const INITIAL_TODOS: TodoItem[] = [
-  { id: '1', title: '김순자 어르신 아침 바이탈 측정', description: '혈압, 맥박, 체온, SpO2', category: 'vital_check', priority: 'high', source: 'ai_generated', residentName: '김순자', room: '201호', scheduledTime: '07:00', dueTime: '08:00', status: 'completed', completionNote: '혈압 130/82' },
-  { id: '2', title: '박영수 어르신 아침 투약', description: '고혈압약, 당뇨약', category: 'medication', priority: 'urgent', source: 'ai_generated', residentName: '박영수', room: '203호', scheduledTime: '07:30', dueTime: '08:00', status: 'completed' },
-  { id: '3', title: '김순자 어르신 아침식사 보조', category: 'meal_assist', priority: 'normal', source: 'ai_generated', residentName: '김순자', room: '201호', scheduledTime: '08:00', dueTime: '09:00', status: 'in_progress' },
-  { id: '4', title: '이영희 어르신 오전 목욕 보조', description: '피부 상태 관찰', category: 'bathing', priority: 'normal', source: 'ai_generated', residentName: '이영희', room: '205호', scheduledTime: '09:30', dueTime: '10:30', status: 'pending' },
-  { id: '5', title: '김순자 어르신 체위 변경', description: '욕창 예방', category: 'position_change', priority: 'high', source: 'ai_generated', residentName: '김순자', room: '201호', scheduledTime: '10:00', dueTime: '10:30', status: 'pending' },
-  { id: '6', title: '보호자 면회 대비 환경 정리', description: '205호 정리', category: 'manager_task', priority: 'high', source: 'manager_assigned', residentName: '이영희', room: '205호', scheduledTime: '13:00', dueTime: '13:30', status: 'pending' },
-  { id: '7', title: '소방훈련 참여', description: '담당 어르신 대피 안내', category: 'manager_task', priority: 'urgent', source: 'manager_assigned', scheduledTime: '15:00', dueTime: '16:00', status: 'pending' },
-  { id: '8', title: '근무 인수인계서 작성', category: 'report', priority: 'normal', source: 'ai_generated', scheduledTime: '16:30', dueTime: '17:00', status: 'pending' },
-];
+type DisplayStatus = 'pending' | 'in_progress' | 'completed';
+type FilterTab = 'all' | 'pending' | 'completed';
 
 export default function TodosScreen() {
-  const [todos, setTodos] = useState<TodoItem[]>(INITIAL_TODOS);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
+  const { data, isLoading, isError, error, refetch, isRefetching } = useTodos();
+  const { mutate: patchTodo, isPending: isPatching } = useTodoPatch();
+
+  const [filter, setFilter] = useState<FilterTab>('all');
   const [noteModal, setNoteModal] = useState<{ todoId: string; action: 'complete' | 'skip' } | null>(null);
   const [noteText, setNoteText] = useState('');
+  // 낙관적 UI: 업데이트 중인 항목 ID 추적
+  const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+
+  const todos: Todo[] = data?.items ?? [];
 
   const filtered = todos
-    .filter(t => {
-      if (filter === 'pending') return t.status === 'pending' || t.status === 'in_progress';
-      if (filter === 'completed') return t.status === 'completed' || t.status === 'skipped';
+    .filter((t) => {
+      const ds = toDisplayStatus(t.status);
+      if (filter === 'pending') return ds === 'pending' || ds === 'in_progress';
+      if (filter === 'completed') return ds === 'completed';
       return true;
     })
-    .sort((a, b) => (a.scheduledTime || '99').localeCompare(b.scheduledTime || '99'));
+    .sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
 
-  const completedCount = todos.filter(t => t.status === 'completed').length;
+  const completedCount = todos.filter(t => t.status === 'done').length;
   const totalCount = todos.length;
-  const rate = Math.round((completedCount / totalCount) * 100);
+  const rate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-  const handleToggle = (id: string) => {
-    const todo = todos.find(t => t.id === id);
-    if (!todo) return;
+  const handleToggle = (todo: Todo) => {
+    const ds = toDisplayStatus(todo.status);
+    if (ds === 'completed') return;
 
-    if (todo.status === 'completed') return; // 완료된 건 되돌리기 불가
-
-    if (todo.status === 'pending') {
-      setTodos(prev => prev.map(t => t.id === id ? { ...t, status: 'in_progress' } : t));
-    } else if (todo.status === 'in_progress') {
-      setNoteModal({ todoId: id, action: 'complete' });
+    if (ds === 'pending') {
+      // pending → in_progress
+      setUpdatingIds(prev => new Set(prev).add(todo.id));
+      patchTodo(
+        { id: todo.id, status: 'in_progress' },
+        {
+          onSettled: () =>
+            setUpdatingIds(prev => { const s = new Set(prev); s.delete(todo.id); return s; }),
+        },
+      );
+    } else {
+      // in_progress → 완료 모달
+      setNoteModal({ todoId: todo.id, action: 'complete' });
     }
   };
 
-  const handleComplete = () => {
+  const handleSkip = (todo: Todo) => {
+    const ds = toDisplayStatus(todo.status);
+    if (ds === 'completed') return;
+    setNoteModal({ todoId: todo.id, action: 'skip' });
+  };
+
+  const handleConfirm = () => {
     if (!noteModal) return;
-    setTodos(prev => prev.map(t =>
-      t.id === noteModal.todoId
-        ? { ...t, status: noteModal.action === 'complete' ? 'completed' : 'skipped', completionNote: noteText || undefined }
-        : t
-    ));
+    const { todoId, action } = noteModal;
     setNoteModal(null);
+
+    setUpdatingIds(prev => new Set(prev).add(todoId));
+    patchTodo(
+      {
+        id: todoId,
+        status: toApiStatus(action === 'complete' ? 'completed' : 'skip'),
+        ...(noteText ? { description: noteText } : {}),
+      },
+      {
+        onSettled: () =>
+          setUpdatingIds(prev => { const s = new Set(prev); s.delete(todoId); return s; }),
+      },
+    );
     setNoteText('');
   };
 
-  const handleSkip = (id: string) => {
-    setNoteModal({ todoId: id, action: 'skip' });
-  };
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>오늘의 업무</Text>
+        </View>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#1A5276" />
+          <Text style={styles.loadingText}>업무 목록 로딩 중...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -104,15 +124,24 @@ export default function TodosScreen() {
         <Text style={styles.headerTitle}>오늘의 업무</Text>
         <View style={styles.progressRow}>
           <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${rate}%` }]} />
+            <View style={[styles.progressFill, { width: `${rate}%` as `${number}%` }]} />
           </View>
           <Text style={styles.progressText}>{completedCount}/{totalCount} ({rate}%)</Text>
         </View>
       </View>
 
+      {isError && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{(error as Error)?.message ?? '로드 실패'}</Text>
+          <TouchableOpacity onPress={() => void refetch()}>
+            <Text style={styles.retryText}>재시도</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* 필터 */}
       <View style={styles.filterRow}>
-        {(['all', 'pending', 'completed'] as const).map(f => (
+        {(['all', 'pending', 'completed'] as FilterTab[]).map(f => (
           <TouchableOpacity
             key={f}
             onPress={() => setFilter(f)}
@@ -125,53 +154,69 @@ export default function TodosScreen() {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.list}>
-        {filtered.map(todo => {
-          const cat = CATEGORIES[todo.category] || CATEGORIES.other;
+      <ScrollView
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />
+        }
+      >
+        {filtered.length === 0 && (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>업무가 없습니다</Text>
+          </View>
+        )}
+        {filtered.map((todo) => {
+          const cat = CATEGORIES[todo.category ?? 'other'] ?? CATEGORIES.other;
+          const ds: DisplayStatus = toDisplayStatus(todo.status);
+          const source = deriveSource(todo.category);
+          const isUpdating = updatingIds.has(todo.id);
+
           return (
             <TouchableOpacity
               key={todo.id}
-              style={[styles.todoCard, todo.status === 'completed' && styles.todoDone]}
-              onPress={() => handleToggle(todo.id)}
-              onLongPress={() => {
-                if (todo.status !== 'completed') handleSkip(todo.id);
-              }}
+              style={[styles.todoCard, ds === 'completed' && styles.todoDone]}
+              onPress={() => handleToggle(todo)}
+              onLongPress={() => handleSkip(todo)}
+              disabled={isUpdating || isPatching}
             >
               {/* 체크 */}
               <View style={[
                 styles.check,
-                todo.status === 'completed' && styles.checkDone,
-                todo.status === 'in_progress' && styles.checkProgress,
+                ds === 'completed' && styles.checkDone,
+                ds === 'in_progress' && styles.checkProgress,
               ]}>
-                {todo.status === 'completed' && <Text style={styles.checkMark}>✓</Text>}
-                {todo.status === 'in_progress' && <View style={styles.progressDot} />}
+                {isUpdating
+                  ? <ActivityIndicator size="small" color="#6B7280" />
+                  : ds === 'completed'
+                    ? <Text style={styles.checkMark}>✓</Text>
+                    : ds === 'in_progress'
+                      ? <View style={styles.progressDot} />
+                      : null
+                }
               </View>
 
               {/* 콘텐츠 */}
               <View style={styles.todoContent}>
                 <View style={styles.tagRow}>
                   <Text style={styles.catTag}>{cat.emoji} {cat.label}</Text>
-                  {todo.source === 'manager_assigned' && (
+                  {source === 'manager_assigned' && (
                     <Text style={styles.managerTag}>⚡ 관리자</Text>
                   )}
                   {todo.priority === 'urgent' && (
                     <Text style={styles.urgentTag}>긴급</Text>
                   )}
                 </View>
-                <Text style={[styles.todoTitle, todo.status === 'completed' && styles.todoTitleDone]}>
+                <Text style={[styles.todoTitle, ds === 'completed' && styles.todoTitleDone]}>
                   {todo.title}
                 </Text>
                 {todo.description && (
                   <Text style={styles.todoDesc}>{todo.description}</Text>
                 )}
-                {todo.completionNote && (
-                  <Text style={styles.noteText}>✓ {todo.completionNote}</Text>
-                )}
               </View>
 
-              {/* 시간 & 대상 */}
+              {/* 날짜 & 대상 */}
               <View style={styles.todoRight}>
-                <Text style={styles.timeText}>{todo.scheduledTime || '--:--'}</Text>
+                <Text style={styles.timeText}>{todo.dueDate ?? '--'}</Text>
                 {todo.residentName && (
                   <Text style={styles.residentText}>{todo.residentName}</Text>
                 )}
@@ -189,7 +234,7 @@ export default function TodosScreen() {
               {noteModal.action === 'complete' ? '업무 완료' : '업무 건너뛰기'}
             </Text>
             <Text style={styles.modalSubtitle}>
-              {noteModal.action === 'complete' ? '완료 메모를 남겨주세요 (선택)' : '사유를 입력해주세요'}
+              {noteModal.action === 'complete' ? '완료 메모 (선택)' : '사유를 입력해주세요'}
             </Text>
             <TextInput
               style={styles.modalInput}
@@ -199,12 +244,15 @@ export default function TodosScreen() {
               multiline
             />
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setNoteModal(null); setNoteText(''); }}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => { setNoteModal(null); setNoteText(''); }}
+              >
                 <Text style={styles.modalCancelText}>취소</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalConfirm, noteModal.action === 'skip' && styles.modalSkipBtn]}
-                onPress={handleComplete}
+                onPress={handleConfirm}
               >
                 <Text style={styles.modalConfirmText}>
                   {noteModal.action === 'complete' ? '완료' : '건너뛰기'}
@@ -226,39 +274,72 @@ const styles = StyleSheet.create({
   progressBar: { flex: 1, height: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4 },
   progressFill: { height: 8, backgroundColor: '#34D399', borderRadius: 4 },
   progressText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  errorBanner: {
+    backgroundColor: '#FEE2E2', padding: 12, flexDirection: 'row',
+    justifyContent: 'space-between', alignItems: 'center',
+  },
+  errorText: { fontSize: 13, color: '#DC2626', flex: 1 },
+  retryText: { fontSize: 13, color: '#DC2626', fontWeight: '700', marginLeft: 8 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  loadingText: { color: '#6B7280', marginTop: 12, fontSize: 14 },
   filterRow: { flexDirection: 'row', padding: 12, gap: 8 },
   filterBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6' },
   filterActive: { backgroundColor: '#1A5276' },
   filterText: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
   filterTextActive: { color: '#fff' },
   list: { padding: 12, gap: 8 },
-  todoCard: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12, padding: 14, gap: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+  emptyContainer: { alignItems: 'center', padding: 32 },
+  emptyText: { color: '#9CA3AF', fontSize: 15 },
+  todoCard: {
+    flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12,
+    padding: 14, gap: 12, borderWidth: 1, borderColor: '#E5E7EB',
+  },
   todoDone: { opacity: 0.5 },
-  check: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  check: {
+    width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#D1D5DB',
+    alignItems: 'center', justifyContent: 'center', marginTop: 2,
+  },
   checkDone: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
   checkProgress: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
   checkMark: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B82F6' },
   todoContent: { flex: 1 },
   tagRow: { flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 4 },
-  catTag: { fontSize: 10, backgroundColor: '#F3F4F6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, color: '#374151' },
-  managerTag: { fontSize: 10, backgroundColor: '#FFF7ED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, color: '#C2410C' },
-  urgentTag: { fontSize: 10, backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, color: '#DC2626', fontWeight: '700' },
+  catTag: {
+    fontSize: 10, backgroundColor: '#F3F4F6', paddingHorizontal: 6,
+    paddingVertical: 2, borderRadius: 4, color: '#374151',
+  },
+  managerTag: {
+    fontSize: 10, backgroundColor: '#FFF7ED', paddingHorizontal: 6,
+    paddingVertical: 2, borderRadius: 4, color: '#C2410C',
+  },
+  urgentTag: {
+    fontSize: 10, backgroundColor: '#FEE2E2', paddingHorizontal: 6,
+    paddingVertical: 2, borderRadius: 4, color: '#DC2626', fontWeight: '700',
+  },
   todoTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
   todoTitleDone: { textDecorationLine: 'line-through', color: '#9CA3AF' },
   todoDesc: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  noteText: { fontSize: 11, color: '#16A34A', marginTop: 4, backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  todoRight: { alignItems: 'flex-end', minWidth: 50 },
-  timeText: { fontSize: 14, fontWeight: '700', color: '#374151' },
+  todoRight: { alignItems: 'flex-end', minWidth: 56 },
+  timeText: { fontSize: 12, fontWeight: '600', color: '#374151' },
   residentText: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-  // Modal
-  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  modalOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center',
+    alignItems: 'center', padding: 24,
+  },
   modal: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
   modalSubtitle: { fontSize: 13, color: '#6B7280', marginTop: 4, marginBottom: 12 },
-  modalInput: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12, fontSize: 14, minHeight: 60, textAlignVertical: 'top' },
+  modalInput: {
+    borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12,
+    fontSize: 14, minHeight: 60, textAlignVertical: 'top',
+  },
   modalButtons: { flexDirection: 'row', gap: 8, marginTop: 16 },
-  modalCancel: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
+  modalCancel: {
+    flex: 1, paddingVertical: 12, borderRadius: 8,
+    borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center',
+  },
   modalCancelText: { fontSize: 14, color: '#6B7280' },
   modalConfirm: { flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#16A34A', alignItems: 'center' },
   modalSkipBtn: { backgroundColor: '#F59E0B' },

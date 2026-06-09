@@ -6,7 +6,7 @@
  */
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, type Href } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 import { useSession, useRole } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/auth/auth-store';
@@ -15,7 +15,7 @@ export interface QuickAction {
   key: string;
   label: string;
   /** 진입 경로. 아직 미구현 화면은 생략 가능(누르면 비활성 안내). */
-  href?: Href;
+  href?: string;
   hint?: string;
 }
 
