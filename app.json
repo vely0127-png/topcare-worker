@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "TopCare 종사자",
+    "slug": "topcare-worker",
+    "scheme": "topcare-worker",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#1A5276"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "kr.topcare.worker"
+    },
+    "android": {
+      "package": "kr.topcare.worker",
+      "adaptiveIcon": {
+        "backgroundColor": "#1A5276"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}
