@@ -58,6 +58,15 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="proximity"
+        options={{
+          title: '근태',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bluetooth-connect" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
