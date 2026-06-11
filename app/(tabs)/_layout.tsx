@@ -59,14 +59,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="proximity"
+        name="service-log"
         options={{
-          title: '근태',
+          title: '자동기록',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="bluetooth-connect" size={size} color={color} />
+            <MaterialCommunityIcons name="clipboard-check" size={size} color={color} />
           ),
         }}
       />
-    </Tabs>
-  );
-}
+      <Tabs.S

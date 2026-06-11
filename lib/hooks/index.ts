@@ -6,3 +6,6 @@ export * from './useTodos';
 export * from './useCareRecords';
 export * from './useMealIntake';
 export * from './useBeaconProximity';
+export * from './useServiceProvisions';
+export * from './useServiceSchedules';
+export * from './useBeaconServiceLog';
