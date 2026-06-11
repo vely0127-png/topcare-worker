@@ -94,6 +94,12 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
   const { mutateAsync: createProvision } = useCreateServiceProvision();
   const { mutateAsync: patchProvision } = usePatchServiceProvision();
 
+  // [Bug2 fix] 최신 mutation 함수를 ref로 유지 — stale closure 방지
+  const createProvisionRef = useRef(createProvision);
+  const patchProvisionRef = useRef(patchProvision);
+  createProvisionRef.current = createProvision;
+  patchProvisionRef.current = patchProvision;
+
   // 서비스 기록 오류
   const [serviceError, setServiceError] = useState<string | null>(null);
 
@@ -101,13 +107,13 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
   const [pendingSelections, setPendingSelections] = useState<PendingSelection[]>([]);
   const pendingEventRef = useRef<Map<string, ProximityEvent>>(new Map()); // selId → event
 
-  // ServiceRecorder (1회 생성)
+  // ServiceRecorder (1회 생성) — opts는 ref를 통해 항상 최신값 사용
   const recorderRef = useRef<ServiceRecorder | null>(null);
   if (!recorderRef.current) {
     recorderRef.current = new ServiceRecorder({
-      createProvision: (vars) => createProvision(vars),
+      createProvision: (vars) => createProvisionRef.current(vars),
       patchProvision: async (id, endAt) => {
-        await patchProvision({ id, endAt });
+        await patchProvisionRef.current({ id, endAt });
       },
       onNeedSelection: (event) => {
         const selId = `sel-${++selCounter}`;
@@ -134,10 +140,17 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
     setOpenServices(recorderRef.current?.openServices() ?? []);
   }, []);
 
+  // [Bug3 fix] 마지막으로 처리한 이벤트 at 값을 추적 — staffId 변경 등으로 인한 재처리 방지
+  const lastProcessedAtRef = useRef<number>(-1);
+
   // BLE 이벤트 → service recorder 연결
   useEffect(() => {
     const last = events[0];
     if (!last || !staffId) return;
+    // 이미 처리한 이벤트이면 무시
+    if (last.at === lastProcessedAtRef.current) return;
+    lastProcessedAtRef.current = last.at;
+
     const recorder = recorderRef.current;
     if (!recorder) return;
 
@@ -146,10 +159,7 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
     } else {
       void recorder.handleExit(last).then(refreshOpen);
     }
-    // events 배열은 새 이벤트가 앞에 prepend됨 → [0]만 처리
-    // 이전 이벤트 중복 처리 방지는 openMap 내부 중복 체크로 보장
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events, staffId]);
+  }, [events, staffId, refreshOpen]);
 
   // 수동 선택 확정
   const resolveSelection = useCallback(
@@ -167,6 +177,8 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
   );
 
   const dismissSelection = useCallback((selId: string) => {
+    const event = pendingEventRef.current.get(selId);
+    if (event) recorderRef.current?.dismissPending(event.uuid); // Bug4 fix: pending uuid 해제
     pendingEventRef.current.delete(selId);
     setPendingSelections((prev) => prev.filter((p) => p.id !== selId));
   }, []);
@@ -198,4 +210,6 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
     serviceError,
     todaySummary,
     resolveSelection,
-   
+    dismissSelection,
+  };
+}
