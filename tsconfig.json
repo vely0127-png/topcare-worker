@@ -4,15 +4,19 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"],
-      "@shared/*": ["../topcare-shared/*"]
+      "@/*": [
+        "./*"
+      ],
+      "@shared/*": [
+        "../topcare-shared/*"
+      ]
     }
   },
   "include": [
     "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "**/*.tsx"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }

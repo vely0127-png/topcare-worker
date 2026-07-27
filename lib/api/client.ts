@@ -138,6 +138,20 @@ export async function apiFetch<T = unknown>(
   return envelope.data as T;
 }
 
+/**
+ * 목록 응답 정규화 (P0-1, 2026-07-27 워커 감사)
+ * 웹 paginated()는 { ok, data: [...배열], total, page } — data 자체가 배열이다.
+ * 워커 훅들이 data.items로 읽어 200 OK인데도 전 목록이 공백이던 결함의 단일 수정점.
+ * (일부 라우트는 success(배열), 혹시 모를 {items} 형태까지 3형 모두 흡수)
+ */
+export function asItems<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === 'object' && Array.isArray((data as any).items)) {
+    return (data as any).items as T[];
+  }
+  return [];
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) =>
     apiFetch<T>(path, { ...options, method: 'GET' }),

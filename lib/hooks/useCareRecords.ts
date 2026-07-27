@@ -3,9 +3,8 @@
  * care-log (서비스 기록) 및 observation (관찰 일지) 공용.
  */
 import { useQueryClient, useMutation } from '@tanstack/react-query';
-import { useApiQuery } from './useApi';
+import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
-import type { Paginated } from './useResidents';
 
 export interface CareRecord {
   id: string;
@@ -41,7 +40,7 @@ export function useCareRecords(params?: {
   if (params?.residentId) qs.set('residentId', params.residentId);
   if (params?.recordType) qs.set('recordType', params.recordType);
   if (params?.date) qs.set('date', params.date);
-  return useApiQuery<Paginated<CareRecord>>(
+  return useApiListQuery<CareRecord>(
     ['care-records', params ?? {}],
     `/api/care/records?${qs}`,
   );

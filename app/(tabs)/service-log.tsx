@@ -22,6 +22,7 @@ import { useAlerts } from '@/lib/hooks/useAlerts';
 import { useResidents } from '@/lib/hooks/useResidents';
 import type { ServiceProvision, ProvisionStatus } from '@/lib/hooks/useServiceProvisions';
 import type { PendingSelection } from '@/lib/hooks/useBeaconServiceLog';
+import { SERVICE_TYPES, serviceTypeLabel } from '@/lib/care/service-rules';
 
 // ── 포맷 헬퍼 ────────────────────────────────────────────────
 function fmtTime(iso: string | null): string {
@@ -77,7 +78,7 @@ function ProvisionCard({
           <Text style={styles.cardResident}>{item.residentName ?? item.residentId}</Text>
           <StatusBadge status={item.status} />
         </View>
-        <Text style={styles.cardServiceType}>{item.serviceType}</Text>
+        <Text style={styles.cardServiceType}>{serviceTypeLabel(item.serviceType)}</Text>
       </View>
 
       <View style={styles.cardTimeRow}>
@@ -146,10 +147,9 @@ function SelectionModal({
   const [selectedResident, setSelectedResident] = useState('');
   const [selectedService, setSelectedService] = useState('');
 
-  const SERVICE_TYPES = [
-    '개인위생', '식사보조', '배변케어', '체위변경',
-    '투약확인', '재활운동', '인지활동', '외출동행',
-  ];
+  // P0-4(2026-07-27): serviceType은 웹 코드값 정본 — 한글 라벨을 값으로 보내면
+  // 관찰·식사·투약 자동 연동과 개인계획 경고(C5)가 전부 미발동된다.
+  const SERVICE_CHOICES = SERVICE_TYPES.filter((t) => t.value !== 'routine');
 
   return (
     <Modal transparent animationType="slide" visible onRequestClose={onDismiss}>
@@ -179,13 +179,13 @@ function SelectionModal({
 
           <Text style={[styles.modalLabel, { marginTop: 12 }]}>서비스 종류</Text>
           <View style={styles.chipGrid}>
-            {SERVICE_TYPES.map((s) => (
+            {SERVICE_CHOICES.map((s) => (
               <TouchableOpacity
-                key={s}
-                style={[styles.chip, selectedService === s && styles.chipOn]}
-                onPress={() => setSelectedService(s)}
+                key={s.value}
+                style={[styles.chip, selectedService === s.value && styles.chipOn]}
+                onPress={() => setSelectedService(s.value)}
               >
-                <Text style={[styles.chipText, selectedService === s && styles.chipTextOn]}>{s}</Text>
+                <Text style={[styles.chipText, selectedService === s.value && styles.chipTextOn]}>{s.label}</Text>
               </TouchableOpacity>
             ))}
           </View>

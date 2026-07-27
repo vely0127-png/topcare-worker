@@ -11,6 +11,7 @@ import {
   useTodos, useTodoPatch, toDisplayStatus, toApiStatus, deriveSource,
   type Todo,
 } from '../../../lib/hooks/useTodos';
+import { useSession } from '../../../lib/hooks/useAuth';
 
 const CATEGORIES: Record<string, { emoji: string; label: string }> = {
   vital_check:    { emoji: '💓', label: '바이탈' },
@@ -33,7 +34,13 @@ type DisplayStatus = 'pending' | 'in_progress' | 'completed';
 type FilterTab = 'all' | 'pending' | 'completed';
 
 export default function TodosScreen() {
-  const { data, isLoading, isError, error, refetch, isRefetching } = useTodos();
+  // P1(2026-07-27): 기관 전체 투두가 아니라 "나에게 배정된 것 + 미배정 공용"만 —
+  // assignedTo 필터는 웹이 지원. staffId 없으면(계정-직원 미연결) 전체 노출 유지(정직).
+  const session = useSession();
+  const staffId = session?.user.staffId ?? undefined;
+  const { data, isLoading, isError, error, refetch, isRefetching } = useTodos(
+    staffId ? { assignedTo: staffId } : undefined,
+  );
   const { mutate: patchTodo, isPending: isPatching } = useTodoPatch();
 
   const [filter, setFilter] = useState<FilterTab>('all');

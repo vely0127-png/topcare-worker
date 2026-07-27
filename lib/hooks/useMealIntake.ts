@@ -2,9 +2,8 @@
  * 식사 섭취 훅 — GET/POST /api/meals/intake
  */
 import { useQueryClient, useMutation } from '@tanstack/react-query';
-import { useApiQuery } from './useApi';
+import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
-import type { Paginated } from './useResidents';
 
 export interface MealIntake {
   id: string;
@@ -33,7 +32,7 @@ export function useMealIntakes(params?: { date?: string; residentId?: string }) 
   const qs = new URLSearchParams({ limit: '200' });
   if (params?.date) qs.set('date', params.date);
   if (params?.residentId) qs.set('residentId', params.residentId);
-  return useApiQuery<Paginated<MealIntake>>(
+  return useApiListQuery<MealIntake>(
     ['meal-intake', params ?? {}],
     `/api/meals/intake?${qs}`,
   );

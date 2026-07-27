@@ -40,3 +40,8 @@ export {
   type ProximityEngineConfig,
   type ProximityEvent,
 } from './types';
+export {
+  ServiceRecorder,
+  type OpenService,
+  type ServiceRecorderOptions,
+} from './service-recorder';

@@ -10,7 +10,37 @@ import {
   type UseMutationOptions,
   type UseQueryOptions,
 } from '@tanstack/react-query';
-import { api, ApiError, type RequestOptions } from '../api/client';
+import { api, ApiError, asItems, type RequestOptions } from '../api/client';
+
+/** 정규화된 목록 형태 — 화면은 항상 data.items로 읽는다. */
+export interface ListResult<T> {
+  items: T[];
+  total: number;
+}
+
+/**
+ * 목록 GET 쿼리 (P0-1, 2026-07-27 워커 감사).
+ * 웹 paginated()는 data 자체가 배열이라, data.items로 읽던 훅들이 전부 빈 목록이었다.
+ * 여기서 배열/{items} 양쪽을 흡수해 항상 { items } 로 정규화한다.
+ */
+export function useApiListQuery<T>(
+  queryKey: readonly unknown[],
+  path: string,
+  options?: {
+    request?: RequestOptions;
+    query?: Omit<UseQueryOptions<ListResult<T>, ApiError>, 'queryKey' | 'queryFn'>;
+  },
+) {
+  return useQuery<ListResult<T>, ApiError>({
+    queryKey,
+    queryFn: async () => {
+      const data = await api.get<unknown>(path, options?.request);
+      const items = asItems<T>(data);
+      return { items, total: items.length };
+    },
+    ...options?.query,
+  });
+}
 
 /**
  * GET 요청 쿼리. queryKey 는 호출부에서 지정 (캐시 무효화 제어용).

@@ -18,14 +18,17 @@ const SEV_LABELS: Record<AlertSeverity, string> = {
   Critical: '위급', High: '높음', Medium: '보통', Low: '낮음',
 };
 
+// P1(2026-07-27): DB alertType 실제 값 기준으로 교체 — 이전 키(FALL_DETECTED 등)는
+// IoT 이벤트명이라 어떤 알림에도 매칭되지 않아 라벨이 항상 fallback이었다.
 const TYPE_LABELS: Record<string, string> = {
-  FALL_DETECTED: '낙상 감지',
-  VITAL_CRISIS: '바이탈 위기',
-  EXIT_ZONE: '구역 이탈',
-  MEDICATION_MISSED: '복약 미실시',
-  NO_MOVEMENT: '무움직임',
-  STRESS_HIGH: '스트레스 높음',
-  DEVICE_OFFLINE: '기기 오프라인',
+  fall: '낙상 감지',
+  sos: 'SOS 호출',
+  exit_zone: '구역 이탈',
+  vital: '바이탈 이상',
+  vital_alert: '바이탈 이상',
+  nurse_call: '간호사 호출',
+  consumable_low: '소모품 부족',
+  care: '케어 알림',
 };
 
 function relTime(iso: string): string {

@@ -46,7 +46,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="bell" size={size} color={color} />
           ),
-          tabBarBadge: 2,
+          // P1(2026-07-27): 하드코딩 배지 제거 — 실 미확인 수 연동 전까지 표시 안 함(가짜 수치 금지)
         }}
       />
       <Tabs.Screen
@@ -67,4 +67,15 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.S
+      <Tabs.Screen
+        name="proximity"
+        options={{
+          title: '근태',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bluetooth-connect" size={size} color={color} />
+          ),
+        }}
+      />
+    </Tabs>
+  );
+}

@@ -9,9 +9,8 @@
  * ★ 자동 확정 없음. confirm/reject 은 반드시 사람이 수행.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useApiQuery } from './useApi';
+import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
-import type { Paginated } from './useResidents';
 
 // ── 타입 ──────────────────────────────────────────────────────
 export type ProvisionStatus = 'draft' | 'confirmed' | 'rejected';
@@ -37,6 +36,8 @@ export interface ServiceProvision {
   reviewNote: string | null;
   note: string | null;
   createdAt: string | null;
+  /** POST 응답에만 실림 — 개인계획 없음(C5)·활성처방 없음(H4) 등 서버 경고. 반드시 사용자에게 노출. */
+  warning?: string;
 }
 
 export interface ServiceProvisionListParams {
@@ -63,7 +64,7 @@ export function useServiceProvisions(params?: ServiceProvisionListParams) {
   if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
   if (params?.dateTo) qs.set('dateTo', params.dateTo);
 
-  return useApiQuery<Paginated<ServiceProvision>>(
+  return useApiListQuery<ServiceProvision>(
     ['service-provisions', params ?? {}],
     `/api/care/service-provisions?${qs}`,
     { query: { refetchInterval: 20_000 } },
@@ -122,6 +123,15 @@ export function useConfirmServiceProvision() {
         `/api/care/service-provisions/${id}`,
         body,
       ),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['service-provisions'] }),
+  });
+}
+
+// ── DELETE (체크 해제 — 웹이 연동 기록도 함께 정리) ───────────
+export function useDeleteServiceProvision() {
+  const qc = useQueryClient();
+  return useMutation<{ id: string }, ApiError, { id: string }>({
+    mutationFn: ({ id }) => api.delete<{ id: string }>(`/api/care/service-provisions/${id}`),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['service-provisions'] }),
   });
 }

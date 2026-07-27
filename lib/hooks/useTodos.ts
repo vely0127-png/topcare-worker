@@ -2,9 +2,8 @@
  * 투두 훅 — GET/PATCH /api/todos
  */
 import { useQueryClient, useMutation } from '@tanstack/react-query';
-import { useApiQuery } from './useApi';
+import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
-import type { Paginated } from './useResidents';
 
 export interface Todo {
   id: string;
@@ -47,7 +46,7 @@ export function deriveSource(category: string | null): 'manager_assigned' | 'ai_
 export function useTodos(filters?: { assignedTo?: string }) {
   const qs = new URLSearchParams({ limit: '100' });
   if (filters?.assignedTo) qs.set('assignedTo', filters.assignedTo);
-  return useApiQuery<Paginated<Todo>>(
+  return useApiListQuery<Todo>(
     ['todos', filters ?? {}],
     `/api/todos?${qs}`,
   );

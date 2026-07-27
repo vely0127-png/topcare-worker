@@ -6,12 +6,13 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "splash": {
       "resizeMode": "contain",
       "backgroundColor": "#1A5276"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "kr.topcare.worker",
@@ -19,7 +20,10 @@
         "NSBluetoothAlwaysUsageDescription": "근무 출퇴근 자동 인증을 위해 시설에 설치된 BLE 비콘 신호를 감지합니다.",
         "NSBluetoothPeripheralUsageDescription": "근무 출퇴근 자동 인증을 위해 시설에 설치된 BLE 비콘 신호를 감지합니다.",
         "NSLocationWhenInUseUsageDescription": "BLE 비콘 근접 감지를 위해 기기 위치 권한이 필요합니다.",
-        "UIBackgroundModes": ["bluetooth-central"]
+        "UIBackgroundModes": [
+          "bluetooth-central",
+          "bluetooth-central"
+        ]
       }
     },
     "android": {
@@ -33,7 +37,17 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"
+        "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN"
       ]
     },
     "web": {
@@ -47,7 +61,9 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": true,
-          "modes": ["central"],
+          "modes": [
+            "central"
+          ],
           "bluetoothAlwaysPermission": "근무 출퇴근 자동 인증을 위해 시설에 설치된 BLE 비콘 신호를 감지합니다."
         }
       ],
@@ -62,6 +78,20 @@
     ],
     "experiments": {
       "typedRoutes": false
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "15fa95d7-af92-49e8-9766-6a656d54ba0c"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/15fa95d7-af92-49e8-9766-6a656d54ba0c"
     }
   }
 }

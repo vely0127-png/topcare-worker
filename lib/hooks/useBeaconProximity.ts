@@ -119,10 +119,11 @@ export function useBeaconProximity(): UseBeaconProximityResult {
         },
         onStateChange: (s) => setScannerState(s),
         onError: (err) => setError(err.message),
-        filterUuids: () => {
-          const known = beaconRegistry.knownUuids();
-          return known.length > 0 ? known : null;
-        },
+        // [임시 디버그] 모든 BLE 기기 표시 — 비콘 UUID 확인용.
+        // 운영 시 아래 registry 필터로 복귀:
+        //   const known = beaconRegistry.knownUuids();
+        //   return known.length > 0 ? known : null;
+        filterUuids: () => null,
       });
     }
     void scannerRef.current.start();

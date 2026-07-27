@@ -17,6 +17,7 @@ export interface ServiceSchedule {
   plannedEnd: string | null;   // 'HH:MM'
   expectedCount: number;
   expectedDurationMin: number | null;
+  intervalMin: number | null; // 반복주기(분) — plannedStart~End 전개 (체위 2시간 등, 웹 2026-07-24)
   toleranceMin: number;
   severity: string;
   isActive: boolean;

@@ -7,7 +7,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@supabase/supabase-js';
-import { api } from '../api/client';
+import { api, asItems } from '../api/client';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config';
 
 // ── 타입 ──────────────────────────────────────────────────────
@@ -67,7 +67,12 @@ export function useAlerts(options?: {
 
   const query = useQuery<PaginatedAlerts, Error>({
     queryKey: ['alerts', options],
-    queryFn: () => api.get<PaginatedAlerts>(`/api/safety/alerts${qs}`),
+    // P0-1(2026-07-27): 웹 paginated()는 data 자체가 배열 — {items}로 정규화 (이전엔 항상 빈 목록)
+    queryFn: async () => {
+      const data = await api.get<unknown>(`/api/safety/alerts${qs}`);
+      const items = asItems<AlertItem>(data);
+      return { items, total: items.length, page: 1, totalPages: 1 };
+    },
     refetchInterval: 30_000,
     staleTime: 10_000,
     retry: 2,

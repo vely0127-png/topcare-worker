@@ -11,9 +11,16 @@ import { useResidents } from '../../lib/hooks/useResidents';
 import { useCareRecordCreate } from '../../lib/hooks/useCareRecords';
 import { useSession } from '../../lib/hooks/useAuth';
 
-const SERVICE_TYPES = [
-  '개인위생', '식사보조', '배변케어', '체위변경',
-  '투약확인', '재활운동', '인지활동', '외출동행',
+// P0-4(2026-07-27): recordType 'care_service'는 웹 어디에도 없는 값 — 보이지 않는 쓰기였다.
+// 웹이 실제로 읽는 recordType으로 매핑 (배설관찰·목욕·간호 탭, 기록지, 주간 변화 리포트에 반영됨).
+// 투약은 시간표/MAR가 정본이라 여기서 제외(이원 입력 방지), 식사는 건강기록 탭(MealIntake)이 정본.
+const SERVICE_OPTIONS: { label: string; recordType: string }[] = [
+  { label: '배변 케어', recordType: 'defecation' },
+  { label: '목욕·개인위생', recordType: 'bathing' },
+  { label: '간호 처치', recordType: 'nursing' },
+  { label: '이동·체위', recordType: 'mobility' },
+  { label: '인지활동', recordType: 'observation' },
+  { label: '외출동행', recordType: 'observation' },
 ];
 
 export default function CareLogScreen() {
@@ -47,11 +54,13 @@ export default function CareLogScreen() {
       ? `[${selectedService}]${notes ? ' ' + notes : ''}`
       : notes;
 
+    const serviceOpt = SERVICE_OPTIONS.find((s) => s.label === selectedService);
     createRecord(
       {
         residentId: selectedResident,
-        recordType: activeTab === 'service' ? 'care_service' : 'observation',
-        recordDate: today.toISOString().slice(0, 10),
+        // P0-4: 웹이 읽는 recordType 코드값 사용 (이전 'care_service'는 어디서도 안 보였음)
+        recordType: activeTab === 'service' ? (serviceOpt?.recordType ?? 'observation') : 'observation',
+        recordDate: new Date(today.getTime() + 9 * 3600_000).toISOString().slice(0, 10), // KST 날짜 (새벽 전날 밀림 방지)
         recordTime: today.toISOString(),
         content,
         staffId: session?.user.staffId ?? null,
@@ -125,14 +134,14 @@ export default function CareLogScreen() {
           <View style={styles.field}>
             <Text style={styles.label}>서비스 종류 *</Text>
             <View style={styles.chipGroup}>
-              {SERVICE_TYPES.map((s) => (
+              {SERVICE_OPTIONS.map((s) => (
                 <TouchableOpacity
-                  key={s}
-                  style={[styles.chip, selectedService === s && styles.chipSelected]}
-                  onPress={() => setSelectedService(s)}
+                  key={s.label}
+                  style={[styles.chip, selectedService === s.label && styles.chipSelected]}
+                  onPress={() => setSelectedService(s.label)}
                 >
-                  <Text style={[styles.chipText, selectedService === s && styles.chipTextSelected]}>
-                    {s}
+                  <Text style={[styles.chipText, selectedService === s.label && styles.chipTextSelected]}>
+                    {s.label}
                   </Text>
                 </TouchableOpacity>
               ))}
