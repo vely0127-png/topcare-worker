@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { homeRouteForRole } from '@/lib/auth/roles';
+import { ApiError } from '@/lib/api/client';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,8 +25,12 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 겸직 등으로 같은 계정이 여러 기관에서 유효할 때만 기관기호 입력란 노출
+  const [needOrgCode, setNeedOrgCode] = useState(false);
 
-  const canSubmit = Boolean(orgCode.trim() && email.trim() && password) && !submitting;
+  // 기관기호는 선택(2026-08-03) — 서버가 아이디+비밀번호로 기관을 해석하고,
+  // 여러 기관에서 유효(겸직 등)할 때만 ORG_REQUIRED(409)로 입력을 요구한다.
+  const canSubmit = Boolean(email.trim() && password) && !submitting;
 
   async function handleLogin() {
     if (!canSubmit) return;
@@ -39,6 +44,9 @@ export default function LoginScreen() {
       });
       router.replace(homeRouteForRole(session.user.role));
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'ORG_REQUIRED') {
+        setNeedOrgCode(true);
+      }
       setError(e instanceof Error ? e.message : '로그인에 실패했습니다');
     } finally {
       setSubmitting(false);
@@ -62,15 +70,6 @@ export default function LoginScreen() {
         <View style={styles.form}>
           <TextInput
             style={styles.input}
-            placeholder="기관기호"
-            autoCapitalize="characters"
-            autoCorrect={false}
-            value={orgCode}
-            onChangeText={setOrgCode}
-            editable={!submitting}
-          />
-          <TextInput
-            style={styles.input}
             placeholder="휴대폰번호 또는 이메일"
             // 서버(dbLogin)가 숫자 10자리 이상이면 전화번호로 해석 — 2026-08-03
             keyboardType="email-address"
@@ -80,6 +79,17 @@ export default function LoginScreen() {
             onChangeText={setEmail}
             editable={!submitting}
           />
+          {needOrgCode && (
+            <TextInput
+              style={styles.input}
+              placeholder="기관기호 (예: HB70001)"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              value={orgCode}
+              onChangeText={setOrgCode}
+              editable={!submitting}
+            />
+          )}
           <TextInput
             style={styles.input}
             placeholder="비밀번호"

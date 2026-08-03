@@ -24,9 +24,10 @@ export interface AuthSession {
 /** 인증 상태 머신. */
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
-/** 로그인 입력 — 웹 API 는 기관기호(orgCode)가 필수. */
+/** 로그인 입력 — 기관기호는 선택(2026-08-03): 서버가 아이디+비밀번호로 기관을
+ *  해석하고, 여러 기관에서 유효할 때만 ORG_REQUIRED로 입력을 요구한다. */
 export interface LoginCredentials {
-  orgCode: string;
+  orgCode?: string;
   email: string;
   password: string;
 }
