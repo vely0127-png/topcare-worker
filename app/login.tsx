@@ -71,7 +71,8 @@ export default function LoginScreen() {
           />
           <TextInput
             style={styles.input}
-            placeholder="이메일"
+            placeholder="휴대폰번호 또는 이메일"
+            // 서버(dbLogin)가 숫자 10자리 이상이면 전화번호로 해석 — 2026-08-03
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
