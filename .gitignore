@@ -12,8 +12,14 @@ web-build/
 .env*.local
 
 # native
+# android/는 2026-08-03부터 커밋 대상 — Android Studio에서 직접 여는 프로젝트.
+# (app.json 변경 시 npx expo prebuild --platform android 재실행으로 동기화)
 ios/
-android/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/release/
 
 # misc
 *.log
