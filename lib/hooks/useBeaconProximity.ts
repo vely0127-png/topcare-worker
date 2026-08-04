@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '../auth/auth-store';
+import { apiFetch } from '../api/client';
 import {
   AttendanceRecorder,
   beaconRegistry,
@@ -17,6 +18,7 @@ import {
   ProximityEngine,
   type AttendanceResult,
   type AttendanceType,
+  type BeaconBinding,
   type BeaconStatus,
   type ProximityEvent,
   type ScannerState,
@@ -24,6 +26,40 @@ import {
 
 const MAX_EVENTS = 50;
 const SWEEP_INTERVAL_MS = 3_000;
+/** 이 시간 안에 관측된 비콘만 '현재 위치' 후보 (ms) */
+const STRONGEST_FRESH_MS = 15_000;
+
+/** 서버 비콘 등록부(/api/beacons) 응답 행 */
+interface ServerBeacon {
+  id: string;
+  beaconId: string;
+  label: string | null;
+  isActive: boolean;
+  room: { id: string; number: string } | null;
+  residents: { id: string; name: string }[];
+}
+
+/**
+ * 서버 등록부 → 레지스트리 동기화 (2026-08-05 — 하드코딩 시드 대체).
+ * 실패(오프라인) 시 기존 매핑 유지 — 스캔 자체는 계속 가능하게.
+ */
+async function syncRegistryFromServer(): Promise<void> {
+  try {
+    const list = await apiFetch<ServerBeacon[]>('/api/beacons');
+    const bindings = (list ?? [])
+      .filter((b) => b.isActive)
+      .map((b) => ({
+        uuid: b.beaconId,
+        roomId: b.room?.id ?? null,
+        roomLabel: b.room ? `${b.room.number}호` : (b.label ?? '공용부'),
+        primary: (b.label ?? '').includes('정문'),
+        residents: b.residents ?? [],
+      }));
+    if (bindings.length > 0) beaconRegistry.setBindings(bindings);
+  } catch {
+    // 등록부 조회 실패 — 기존(시드/이전 동기화) 매핑 유지
+  }
+}
 
 export interface BeaconAttendanceState {
   clockIn: string | null;
@@ -42,6 +78,10 @@ export interface UseBeaconProximityResult {
   error: string | null;
   start: () => void;
   stop: () => void;
+  /** 최근(15초) 관측 중 신호가 가장 센 비콘 = 현재 위치 후보 (2026-08-05) */
+  strongest: BeaconStatus | null;
+  /** strongest의 등록부 정보 — 호실 라벨·해당 위치 입소자 */
+  currentBinding: BeaconBinding | null;
 }
 
 export function useBeaconProximity(): UseBeaconProximityResult {
@@ -111,6 +151,9 @@ export function useBeaconProximity(): UseBeaconProximityResult {
     const engine = engineRef.current;
     if (!engine) return;
 
+    // 서버 등록부 동기화 후 스캔 (실패해도 스캔은 진행 — 기존 매핑 유지)
+    void syncRegistryFromServer();
+
     if (!scannerRef.current) {
       scannerRef.current = new BleBeaconScanner({
         onObservation: (obs) => {
@@ -119,11 +162,11 @@ export function useBeaconProximity(): UseBeaconProximityResult {
         },
         onStateChange: (s) => setScannerState(s),
         onError: (err) => setError(err.message),
-        // [임시 디버그] 모든 BLE 기기 표시 — 비콘 UUID 확인용.
-        // 운영 시 아래 registry 필터로 복귀:
-        //   const known = beaconRegistry.knownUuids();
-        //   return known.length > 0 ? known : null;
-        filterUuids: () => null,
+        // 등록된 비콘만 필터 — 등록부가 비어 있으면 전체 표시(설치 전 UUID 확인용)
+        filterUuids: () => {
+          const known = beaconRegistry.knownUuids();
+          return known.length > 0 ? known : null;
+        },
       });
     }
     void scannerRef.current.start();
@@ -158,6 +201,21 @@ export function useBeaconProximity(): UseBeaconProximityResult {
     [],
   );
 
+  // ── 현재 위치 판정 (2026-08-05): 최근 관측 + 신호 최강 비콘 ──
+  const strongest = useMemo<BeaconStatus | null>(() => {
+    const now = Date.now();
+    const fresh = beacons.filter(
+      (b) => b.lastSeenAt != null && now - b.lastSeenAt <= STRONGEST_FRESH_MS && b.smoothedRssi != null,
+    );
+    if (fresh.length === 0) return null;
+    return fresh.reduce((best, b) => ((b.smoothedRssi ?? -999) > (best.smoothedRssi ?? -999) ? b : best));
+  }, [beacons]);
+
+  const currentBinding = useMemo<BeaconBinding | null>(
+    () => (strongest ? beaconRegistry.get(strongest.uuid) ?? null : null),
+    [strongest],
+  );
+
   return {
     supported,
     scannerState,
@@ -168,5 +226,7 @@ export function useBeaconProximity(): UseBeaconProximityResult {
     error,
     start,
     stop,
+    strongest,
+    currentBinding,
   };
 }

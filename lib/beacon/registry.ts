@@ -24,6 +24,8 @@ export interface BeaconBinding {
   minor?: number;
   /** 시설/출입 인증의 기준이 되는 대표 비콘인지(예: 정문). */
   primary?: boolean;
+  /** 이 위치(호실)의 입소자 — 서버 등록부(/api/beacons) 동기화 시 채워짐 (2026-08-05). */
+  residents?: { id: string; name: string }[];
 }
 
 export class BeaconRegistry {

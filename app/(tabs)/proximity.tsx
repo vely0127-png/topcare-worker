@@ -8,15 +8,22 @@
  * - 정문 비콘 enter/exit 시 자동 출퇴근 결과
  */
 import { useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useBeaconProximity } from '@/lib/hooks/useBeaconProximity';
+import { useTodayTasks, kstNowHHMM, type DisplayRow } from '@/lib/hooks/useTodayTasks';
+import { serviceTypeLabel } from '@/lib/care/service-rules';
 import { apiFetch } from '@/lib/api/client';
 import type { ScannerState } from '@/lib/beacon';
+
+// 현재 업무 시간창: 계획 시각이 [now-120분, now+30분] 이내 → "지금 이 위치의 업무"
+const WINDOW_BEFORE_MIN = 120;
+const WINDOW_AFTER_MIN = 30;
+const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
 const STATE_LABEL: Record<ScannerState, { text: string; color: string }> = {
   idle: { text: '대기', color: '#6B7280' },
@@ -48,10 +55,63 @@ export default function ProximityScreen() {
     error,
     start,
     stop,
+    strongest,
+    currentBinding,
   } = useBeaconProximity();
 
   const status = useMemo(() => STATE_LABEL[scannerState], [scannerState]);
   const router = useRouter();
+
+  // ── 비콘 주도 서비스 기록 (2026-08-05): 현재 위치 입소자의 업무를 자동 제시 ──
+  // 자동은 제시까지 — 기록(확인)은 사람이 탭. 완료 체크는 오늘 할 일과 동일 규약.
+  const tasks = useTodayTasks();
+  const locationRows = useMemo(() => {
+    const residentIds = new Set((currentBinding?.residents ?? []).map((r) => r.id));
+    if (residentIds.size === 0) return { now: [] as DisplayRow[], upcoming: [] as DisplayRow[] };
+    const nowMin = toMin(kstNowHHMM());
+    const mine = tasks.rows.filter((r) => residentIds.has(r.residentId) && r.plannedStart);
+    const now: DisplayRow[] = [];
+    const upcoming: DisplayRow[] = [];
+    for (const r of mine) {
+      const t = toMin(r.plannedStart!);
+      if (t >= nowMin - WINDOW_BEFORE_MIN && t <= nowMin + WINDOW_AFTER_MIN) now.push(r);
+      else if (t > nowMin + WINDOW_AFTER_MIN) upcoming.push(r);
+    }
+    return { now, upcoming: upcoming.slice(0, 5) };
+  }, [currentBinding, tasks.rows]);
+
+  const onCheck = (row: DisplayRow) =>
+    void tasks.toggle(
+      row,
+      (msg) => Alert.alert('확인 필요', msg),
+      (msg) => Alert.alert('저장 실패', msg),
+    );
+
+  const renderTaskRow = (row: DisplayRow) => {
+    const done = Boolean(tasks.provisionFor(row));
+    const busy = tasks.pendingKeys.has(row.key);
+    return (
+      <TouchableOpacity
+        key={row.key}
+        style={[styles.locTask, done && styles.locTaskDone]}
+        onPress={() => onCheck(row)}
+        disabled={busy}
+      >
+        <Text style={styles.locTaskTime}>{row.plannedStart}</Text>
+        <View style={[styles.locTaskCheck, done && styles.locTaskCheckDone]}>
+          {busy ? <ActivityIndicator size="small" color={done ? '#fff' : '#1A9A8A'} />
+            : done ? <Text style={styles.locCheckmark}>✓</Text> : null}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.locTaskTitle, done && styles.locTaskTitleDone]}>
+            {row.residentName} — {row.note || serviceTypeLabel(row.serviceType)}
+          </Text>
+          <Text style={styles.locTaskMeta}>{serviceTypeLabel(row.serviceType)} · {row.dayLabel}</Text>
+        </View>
+        {!done && <Text style={styles.locConfirm}>확인</Text>}
+      </TouchableOpacity>
+    );
+  };
 
   // 비콘 등록 권한(workeradmin) — 있으면 등록 진입 버튼 노출 (2026-08-05)
   const beaconPerm = useQuery({
@@ -109,6 +169,45 @@ export default function ProximityScreen() {
           </View>
         )}
 
+        {/* ── 현재 위치 (신호 최강 비콘) + 해당 위치 업무 자동 제시 ── */}
+        {scanning && strongest && (
+          <View style={styles.locationCard}>
+            <View style={styles.locationHeader}>
+              <MaterialCommunityIcons name="map-marker-radius" size={22} color="#fff" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.locationTitle}>
+                  현재 위치: {currentBinding?.roomLabel ?? strongest.roomLabel ?? '미등록 비콘'}
+                </Text>
+                <Text style={styles.locationMeta}>
+                  {fmtDistance(strongest.distanceMeters)} · {strongest.smoothedRssi?.toFixed(0) ?? '—'} dBm
+                  {(currentBinding?.residents?.length ?? 0) > 0
+                    ? ` · ${currentBinding!.residents!.map((r) => r.name).join(', ')}`
+                    : ''}
+                </Text>
+              </View>
+            </View>
+
+            {(currentBinding?.residents?.length ?? 0) === 0 ? (
+              <Text style={styles.locationEmpty}>
+                {currentBinding ? '이 위치에 배정된 입소자가 없습니다 (웹 설정 › 비콘에서 배정)' : '미등록 비콘 — [비콘 등록]에서 등록하면 업무가 자동 제시됩니다'}
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.locSection}>지금 이 위치의 업무</Text>
+                {locationRows.now.length === 0
+                  ? <Text style={styles.locationEmpty}>이 시간대 계획된 업무가 없습니다</Text>
+                  : locationRows.now.map(renderTaskRow)}
+                {locationRows.upcoming.length > 0 && (
+                  <>
+                    <Text style={styles.locSection}>다음 업무 (시간 되면 확인)</Text>
+                    {locationRows.upcoming.map(renderTaskRow)}
+                  </>
+                )}
+              </>
+            )}
+          </View>
+        )}
+
         {/* 출퇴근 결과 */}
         {attendance && (
           <View style={styles.section}>
@@ -133,29 +232,34 @@ export default function ProximityScreen() {
           {beacons.length === 0 ? (
             <Text style={styles.empty}>아직 감지된 비콘이 없습니다.</Text>
           ) : (
-            beacons.map((b) => (
-              <View key={b.uuid} style={styles.beaconCard}>
-                <View style={[styles.insideBadge, b.inside ? styles.insideOn : styles.insideOff]}>
-                  <MaterialCommunityIcons
-                    name={b.inside ? 'map-marker-check' : 'map-marker-outline'}
-                    size={16}
-                    color={b.inside ? '#16A34A' : '#9CA3AF'}
-                  />
+            beacons.map((b) => {
+              const isStrongest = strongest?.uuid === b.uuid;
+              return (
+                <View key={b.uuid} style={[styles.beaconCard, isStrongest && styles.beaconStrongest]}>
+                  <View style={[styles.insideBadge, b.inside ? styles.insideOn : styles.insideOff]}>
+                    <MaterialCommunityIcons
+                      name={isStrongest ? 'map-marker-radius' : b.inside ? 'map-marker-check' : 'map-marker-outline'}
+                      size={16}
+                      color={isStrongest ? '#1D4ED8' : b.inside ? '#16A34A' : '#9CA3AF'}
+                    />
+                  </View>
+                  <View style={styles.beaconInfo}>
+                    <Text style={[styles.beaconLabel, isStrongest && styles.beaconLabelStrong]}>
+                      {b.roomLabel ?? '미등록 비콘'}{isStrongest ? ' · 현재 위치' : ''}
+                    </Text>
+                    <Text style={styles.beaconUuid} numberOfLines={1}>
+                      {b.uuid}
+                    </Text>
+                  </View>
+                  <View style={styles.beaconRight}>
+                    <Text style={[styles.beaconDist, isStrongest && styles.beaconLabelStrong]}>{fmtDistance(b.distanceMeters)}</Text>
+                    <Text style={styles.beaconRssi}>
+                      {b.smoothedRssi != null ? `${b.smoothedRssi.toFixed(0)} dBm` : '—'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.beaconInfo}>
-                  <Text style={styles.beaconLabel}>{b.roomLabel ?? '미등록 비콘'}</Text>
-                  <Text style={styles.beaconUuid} numberOfLines={1}>
-                    {b.uuid}
-                  </Text>
-                </View>
-                <View style={styles.beaconRight}>
-                  <Text style={styles.beaconDist}>{fmtDistance(b.distanceMeters)}</Text>
-                  <Text style={styles.beaconRssi}>
-                    {b.smoothedRssi != null ? `${b.smoothedRssi.toFixed(0)} dBm` : '—'}
-                  </Text>
-                </View>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 
@@ -198,6 +302,31 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#dbeafe',
   },
   registerEntryText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1A5276' },
+  // 현재 위치 카드 + 위치 업무 (2026-08-05)
+  locationCard: { backgroundColor: '#1A5276', borderRadius: 12, padding: 14, gap: 10 },
+  locationHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  locationTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  locationMeta: { color: '#fff', fontSize: 12, opacity: 0.8, marginTop: 2 },
+  locationEmpty: { color: '#fff', fontSize: 13, opacity: 0.75, paddingVertical: 4 },
+  locSection: { color: '#fff', fontSize: 12, fontWeight: '700', opacity: 0.85, marginTop: 4 },
+  locTask: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#fff', borderRadius: 10, padding: 12, minHeight: 56,
+  },
+  locTaskDone: { backgroundColor: '#F0FDFA' },
+  locTaskTime: { width: 42, fontSize: 13, fontVariant: ['tabular-nums'], color: '#6B7280', fontWeight: '600' },
+  locTaskCheck: {
+    width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: '#D1D5DB',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  locTaskCheckDone: { backgroundColor: '#1A9A8A', borderColor: '#1A9A8A' },
+  locCheckmark: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+  locTaskTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  locTaskTitleDone: { textDecorationLine: 'line-through', color: '#6B7280' },
+  locTaskMeta: { fontSize: 11, color: '#9CA3AF', marginTop: 1 },
+  locConfirm: { fontSize: 12, fontWeight: '700', color: '#1A9A8A' },
+  beaconStrongest: { borderColor: '#1D4ED8', borderWidth: 2, backgroundColor: '#EFF6FF' },
+  beaconLabelStrong: { color: '#1D4ED8' },
   headerCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
