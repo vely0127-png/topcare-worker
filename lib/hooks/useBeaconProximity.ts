@@ -42,8 +42,9 @@ interface ServerBeacon {
 /**
  * 서버 등록부 → 레지스트리 동기화 (2026-08-05 — 하드코딩 시드 대체).
  * 실패(오프라인) 시 기존 매핑 유지 — 스캔 자체는 계속 가능하게.
+ * beacon-register 화면이 등록 직후에도 호출한다(재시작 없이 즉시 반영).
  */
-async function syncRegistryFromServer(): Promise<void> {
+export async function syncRegistryFromServer(): Promise<void> {
   try {
     const list = await apiFetch<ServerBeacon[]>('/api/beacons');
     const bindings = (list ?? [])
@@ -162,11 +163,10 @@ export function useBeaconProximity(): UseBeaconProximityResult {
         },
         onStateChange: (s) => setScannerState(s),
         onError: (err) => setError(err.message),
-        // 등록된 비콘만 필터 — 등록부가 비어 있으면 전체 표시(설치 전 UUID 확인용)
-        filterUuids: () => {
-          const known = beaconRegistry.knownUuids();
-          return known.length > 0 ? known : null;
-        },
+        // 전체 스캔 유지 (2026-08-05 회귀 수정): QR 등록값과 BLE 전파 식별자(UUID/MAC)가
+        // 다를 수 있어 등록부로 필터하면 등록 비콘조차 걸러진다. 필터는 표시단에서 —
+        // 등록 비콘 우선 정렬 + 현재 위치 판정은 등록 비콘만. 미등록 기기는 현장 등록용으로 노출.
+        filterUuids: () => null,
       });
     }
     void scannerRef.current.start();
@@ -201,11 +201,13 @@ export function useBeaconProximity(): UseBeaconProximityResult {
     [],
   );
 
-  // ── 현재 위치 판정 (2026-08-05): 최근 관측 + 신호 최강 비콘 ──
+  // ── 현재 위치 판정 (2026-08-05): 최근 관측 + 신호 최강 — 등록된 비콘만 후보
+  // (주변 스마트폰·이어폰 등 미등록 기기가 '현재 위치'를 차지하면 안 됨)
   const strongest = useMemo<BeaconStatus | null>(() => {
     const now = Date.now();
     const fresh = beacons.filter(
-      (b) => b.lastSeenAt != null && now - b.lastSeenAt <= STRONGEST_FRESH_MS && b.smoothedRssi != null,
+      (b) => b.lastSeenAt != null && now - b.lastSeenAt <= STRONGEST_FRESH_MS
+        && b.smoothedRssi != null && beaconRegistry.has(b.uuid),
     );
     if (fresh.length === 0) return null;
     return fresh.reduce((best, b) => ((b.smoothedRssi ?? -999) > (best.smoothedRssi ?? -999) ? b : best));

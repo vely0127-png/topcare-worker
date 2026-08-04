@@ -7,12 +7,13 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarCodeScanner } from 'expo-barcode-scanner';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { apiFetch } from '@/lib/api/client';
+import { syncRegistryFromServer } from '@/lib/hooks/useBeaconProximity';
 
 interface RoomOpt { id: string; number: string; floor?: number | null }
 interface BeaconRow {
@@ -24,7 +25,9 @@ interface BeaconRow {
 export default function BeaconRegisterScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [beaconId, setBeaconId] = useState('');
+  // 근접 화면에서 감지된 미등록 비콘의 식별자를 프리필 (QR값≠전파 식별자 문제의 현장 해법)
+  const params = useLocalSearchParams<{ uuid?: string }>();
+  const [beaconId, setBeaconId] = useState(typeof params.uuid === 'string' ? params.uuid : '');
   const [roomId, setRoomId] = useState('');
   const [label, setLabel] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
@@ -63,6 +66,7 @@ export default function BeaconRegisterScreen() {
       Alert.alert('등록 완료', `비콘이 등록되었습니다${roomId ? '' : ' (공용부 — 호실은 웹에서 지정 가능)'}`);
       setBeaconId(''); setLabel(''); setRoomId('');
       await queryClient.invalidateQueries({ queryKey: ['beacons'] });
+      await syncRegistryFromServer(); // 스캔 레지스트리 즉시 반영 (재시작 불필요)
     } catch (e) {
       Alert.alert('등록 실패', e instanceof Error ? e.message : '잠시 후 다시 시도해주세요');
     } finally {

@@ -7,23 +7,31 @@
  * - enter/exit 이벤트 스트림(시간순)
  * - 정문 비콘 enter/exit 시 자동 출퇴근 결과
  */
-import { useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import * as Notifications from 'expo-notifications';
 import { useBeaconProximity } from '@/lib/hooks/useBeaconProximity';
 import { useTodayTasks, kstNowHHMM, type DisplayRow } from '@/lib/hooks/useTodayTasks';
-import { serviceTypeLabel } from '@/lib/care/service-rules';
+import { useCreateServiceProvision } from '@/lib/hooks/useServiceProvisions';
+import { serviceTypeLabel, SERVICE_TYPES } from '@/lib/care/service-rules';
 import { apiFetch } from '@/lib/api/client';
-import type { ScannerState } from '@/lib/beacon';
+import { beaconRegistry, type ScannerState } from '@/lib/beacon';
 
 // 현재 업무 시간창: 계획 시각이 [now-120분, now+30분] 이내 → "지금 이 위치의 업무"
 const WINDOW_BEFORE_MIN = 120;
 const WINDOW_AFTER_MIN = 30;
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+
+// ── 체류 프롬프트 (2026-08-05): 같은 비콘에 오래 머물면 "무슨 서비스?" 질문 ──
+// 임계·쿨다운은 실비콘 테스트로 튜닝 예정(추정값).
+const DWELL_PROMPT_MS = 3 * 60_000;   // 3분 체류 시 질문
+const DWELL_COOLDOWN_MS = 20 * 60_000; // 같은 비콘 재질문 최소 간격
+const DWELL_TICK_MS = 10_000;
 
 const STATE_LABEL: Record<ScannerState, { text: string; color: string }> = {
   idle: { text: '대기', color: '#6B7280' },
@@ -86,6 +94,78 @@ export default function ProximityScreen() {
       (msg) => Alert.alert('확인 필요', msg),
       (msg) => Alert.alert('저장 실패', msg),
     );
+
+  // ── 체류 감지 → 서비스 질문 프롬프트 ──────────────────
+  const createProvision = useCreateServiceProvision();
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [dwellMinutes, setDwellMinutes] = useState(0);
+  const [otherType, setOtherType] = useState<string | null>(null);
+  const [otherResidentId, setOtherResidentId] = useState<string | null>(null);
+  const [adhocBusy, setAdhocBusy] = useState(false);
+  const dwellUuidRef = useRef<string | null>(null);
+  const dwellStartRef = useRef<number>(0);
+  const lastPromptAtRef = useRef<Map<string, number>>(new Map());
+
+  // 최강 비콘이 바뀌면 체류 타이머 리셋
+  useEffect(() => {
+    const uuid = strongest?.uuid ?? null;
+    if (uuid !== dwellUuidRef.current) {
+      dwellUuidRef.current = uuid;
+      dwellStartRef.current = Date.now();
+    }
+  }, [strongest?.uuid]);
+
+  // 주기 점검: 체류 시간 초과 + 입소자 있는 위치 + 쿨다운 지남 → 질문
+  useEffect(() => {
+    if (!scanning) return;
+    const timer = setInterval(() => {
+      const uuid = dwellUuidRef.current;
+      if (!uuid || promptOpen) return;
+      const dwellMs = Date.now() - dwellStartRef.current;
+      if (dwellMs < DWELL_PROMPT_MS) return;
+      const binding = currentBinding;
+      if (!binding || (binding.residents?.length ?? 0) === 0) return;
+      const lastAt = lastPromptAtRef.current.get(uuid) ?? 0;
+      if (Date.now() - lastAt < DWELL_COOLDOWN_MS) return;
+
+      lastPromptAtRef.current.set(uuid, Date.now());
+      setDwellMinutes(Math.round(dwellMs / 60_000));
+      setOtherType(null);
+      setOtherResidentId(binding.residents!.length === 1 ? binding.residents![0].id : null);
+      setPromptOpen(true);
+      // 다른 탭에 있어도 보이도록 로컬 알림 (실패해도 무시 — 프롬프트가 정본)
+      void Notifications.scheduleNotificationAsync({
+        content: {
+          title: `${binding.roomLabel}에 ${Math.round(dwellMs / 60_000)}분째 머무르는 중`,
+          body: '어떤 서비스를 제공하고 계신가요? 앱에서 기록해주세요.',
+        },
+        trigger: null,
+      }).catch(() => {});
+    }, DWELL_TICK_MS);
+    return () => clearInterval(timer);
+  }, [scanning, promptOpen, currentBinding]);
+
+  /** 시간표 외 업무·라뽀 즉석 기록 — source='beacon'으로 추적 가능하게 */
+  const recordAdhoc = async (serviceType: string, note: string, residentId: string) => {
+    setAdhocBusy(true);
+    try {
+      const created = await createProvision.mutateAsync({
+        residentId,
+        serviceType,
+        serviceDate: tasks.today,
+        startAt: new Date().toISOString(),
+        source: 'beacon',
+        note,
+      });
+      if (created?.warning) Alert.alert('확인 필요', created.warning);
+      setPromptOpen(false);
+      setOtherType(null);
+    } catch (e) {
+      Alert.alert('저장 실패', e instanceof Error ? e.message : '네트워크 오류');
+    } finally {
+      setAdhocBusy(false);
+    }
+  };
 
   const renderTaskRow = (row: DisplayRow) => {
     const done = Boolean(tasks.provisionFor(row));
@@ -226,40 +306,60 @@ export default function ProximityScreen() {
           </View>
         )}
 
-        {/* 감지된 비콘 */}
+        {/* 감지된 비콘 — 등록 비콘 우선, 미등록은 현장 등록 가능 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>감지된 비콘 ({beacons.length})</Text>
           {beacons.length === 0 ? (
-            <Text style={styles.empty}>아직 감지된 비콘이 없습니다.</Text>
+            <View>
+              <Text style={styles.empty}>아직 감지된 비콘이 없습니다.</Text>
+              {scanning && (
+                <Text style={styles.scanHint}>
+                  계속 안 잡히면 확인: ① 폰의 위치(GPS) 켜기 ② 블루투스 켜기
+                  ③ 설정 › 앱 › TopCare 종사자 › 권한에서 위치·주변기기 허용
+                </Text>
+              )}
+            </View>
           ) : (
-            beacons.map((b) => {
-              const isStrongest = strongest?.uuid === b.uuid;
-              return (
-                <View key={b.uuid} style={[styles.beaconCard, isStrongest && styles.beaconStrongest]}>
-                  <View style={[styles.insideBadge, b.inside ? styles.insideOn : styles.insideOff]}>
-                    <MaterialCommunityIcons
-                      name={isStrongest ? 'map-marker-radius' : b.inside ? 'map-marker-check' : 'map-marker-outline'}
-                      size={16}
-                      color={isStrongest ? '#1D4ED8' : b.inside ? '#16A34A' : '#9CA3AF'}
-                    />
+            [...beacons]
+              .sort((a, b) => Number(beaconRegistry.has(b.uuid)) - Number(beaconRegistry.has(a.uuid))
+                || (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999))
+              .map((b) => {
+                const isStrongest = strongest?.uuid === b.uuid;
+                const registered = beaconRegistry.has(b.uuid);
+                return (
+                  <View key={b.uuid} style={[styles.beaconCard, isStrongest && styles.beaconStrongest]}>
+                    <View style={[styles.insideBadge, b.inside ? styles.insideOn : styles.insideOff]}>
+                      <MaterialCommunityIcons
+                        name={isStrongest ? 'map-marker-radius' : b.inside ? 'map-marker-check' : 'map-marker-outline'}
+                        size={16}
+                        color={isStrongest ? '#1D4ED8' : b.inside ? '#16A34A' : '#9CA3AF'}
+                      />
+                    </View>
+                    <View style={styles.beaconInfo}>
+                      <Text style={[styles.beaconLabel, isStrongest && styles.beaconLabelStrong]}>
+                        {b.roomLabel ?? '미등록 기기'}{isStrongest ? ' · 현재 위치' : ''}
+                      </Text>
+                      <Text style={styles.beaconUuid} numberOfLines={1}>
+                        {b.uuid}
+                      </Text>
+                    </View>
+                    <View style={styles.beaconRight}>
+                      <Text style={[styles.beaconDist, isStrongest && styles.beaconLabelStrong]}>{fmtDistance(b.distanceMeters)}</Text>
+                      <Text style={styles.beaconRssi}>
+                        {b.smoothedRssi != null ? `${b.smoothedRssi.toFixed(0)} dBm` : '—'}
+                      </Text>
+                    </View>
+                    {!registered && beaconPerm.data?.canRegister && (
+                      <TouchableOpacity
+                        style={styles.registerChip}
+                        onPress={() => router.push({ pathname: '/beacon-register', params: { uuid: b.uuid } })}
+                      >
+                        <Text style={styles.registerChipText}>등록</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                  <View style={styles.beaconInfo}>
-                    <Text style={[styles.beaconLabel, isStrongest && styles.beaconLabelStrong]}>
-                      {b.roomLabel ?? '미등록 비콘'}{isStrongest ? ' · 현재 위치' : ''}
-                    </Text>
-                    <Text style={styles.beaconUuid} numberOfLines={1}>
-                      {b.uuid}
-                    </Text>
-                  </View>
-                  <View style={styles.beaconRight}>
-                    <Text style={[styles.beaconDist, isStrongest && styles.beaconLabelStrong]}>{fmtDistance(b.distanceMeters)}</Text>
-                    <Text style={styles.beaconRssi}>
-                      {b.smoothedRssi != null ? `${b.smoothedRssi.toFixed(0)} dBm` : '—'}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
+                );
+              })
           )}
         </View>
 
@@ -289,6 +389,96 @@ export default function ProximityScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* ── 체류 질문 모달 (2026-08-05): 오래 머문 위치에서 무엇을 했는지 ── */}
+      <Modal visible={promptOpen} animationType="slide" transparent onRequestClose={() => setPromptOpen(false)}>
+        <View style={styles.promptBackdrop}>
+          <View style={styles.promptSheet}>
+            <Text style={styles.promptTitle}>
+              {currentBinding?.roomLabel ?? '이 위치'}에 {dwellMinutes}분째 머무르는 중
+            </Text>
+            <Text style={styles.promptSub}>어떤 서비스를 제공하고 계신가요?</Text>
+
+            <ScrollView style={{ maxHeight: 380 }}>
+              {/* ① 시간표 업무 */}
+              {locationRows.now.filter((r) => !tasks.provisionFor(r)).length > 0 && (
+                <>
+                  <Text style={styles.promptSection}>시간표 업무</Text>
+                  {locationRows.now.filter((r) => !tasks.provisionFor(r)).map((row) => (
+                    <TouchableOpacity
+                      key={row.key}
+                      style={styles.promptOption}
+                      disabled={tasks.pendingKeys.has(row.key)}
+                      onPress={() => { onCheck(row); setPromptOpen(false); }}
+                    >
+                      <Text style={styles.promptOptionText}>
+                        {row.plannedStart} {row.residentName} — {row.note || serviceTypeLabel(row.serviceType)}
+                      </Text>
+                      <Text style={styles.promptOptionDo}>진행함</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
+
+              {/* ② 라뽀 (대화·놀이) */}
+              <Text style={styles.promptSection}>라뽀 (대화·놀이)</Text>
+              {(currentBinding?.residents ?? []).map((r) => (
+                <TouchableOpacity
+                  key={`rapport-${r.id}`}
+                  style={[styles.promptOption, styles.promptRapport]}
+                  disabled={adhocBusy}
+                  onPress={() => void recordAdhoc('routine', '라뽀 — 대화·놀이(정서지원)', r.id)}
+                >
+                  <Text style={styles.promptOptionText}>{r.name}님과 대화·놀이</Text>
+                  <MaterialCommunityIcons name="heart-outline" size={18} color="#DB2777" />
+                </TouchableOpacity>
+              ))}
+
+              {/* ③ 다른 업무 */}
+              <Text style={styles.promptSection}>다른 업무</Text>
+              <View style={styles.promptChips}>
+                {SERVICE_TYPES.map((t) => (
+                  <TouchableOpacity
+                    key={t.value}
+                    style={[styles.promptChip, otherType === t.value && styles.promptChipOn]}
+                    onPress={() => setOtherType(otherType === t.value ? null : t.value)}
+                  >
+                    <Text style={[styles.promptChipText, otherType === t.value && styles.promptChipTextOn]}>{t.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {otherType && (currentBinding?.residents?.length ?? 0) > 1 && (
+                <View style={styles.promptChips}>
+                  {(currentBinding?.residents ?? []).map((r) => (
+                    <TouchableOpacity
+                      key={`res-${r.id}`}
+                      style={[styles.promptChip, otherResidentId === r.id && styles.promptChipOn]}
+                      onPress={() => setOtherResidentId(r.id)}
+                    >
+                      <Text style={[styles.promptChipText, otherResidentId === r.id && styles.promptChipTextOn]}>{r.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {otherType && (
+                <TouchableOpacity
+                  style={[styles.promptSubmit, (!otherResidentId || adhocBusy) && { opacity: 0.4 }]}
+                  disabled={!otherResidentId || adhocBusy}
+                  onPress={() => otherResidentId && void recordAdhoc(otherType, '[비콘] 현장 확인 기록', otherResidentId)}
+                >
+                  <Text style={styles.promptSubmitText}>
+                    {adhocBusy ? '기록 중…' : `${serviceTypeLabel(otherType)} 기록`}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.promptLater} onPress={() => setPromptOpen(false)}>
+              <Text style={styles.promptLaterText}>나중에</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -327,6 +517,32 @@ const styles = StyleSheet.create({
   locConfirm: { fontSize: 12, fontWeight: '700', color: '#1A9A8A' },
   beaconStrongest: { borderColor: '#1D4ED8', borderWidth: 2, backgroundColor: '#EFF6FF' },
   beaconLabelStrong: { color: '#1D4ED8' },
+  scanHint: { fontSize: 12, color: '#D97706', lineHeight: 18, marginTop: 8 },
+  registerChip: { backgroundColor: '#1A5276', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginLeft: 8 },
+  registerChipText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // 체류 질문 모달 (2026-08-05)
+  promptBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  promptSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 32 },
+  promptTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  promptSub: { fontSize: 13, color: '#64748b', marginTop: 4, marginBottom: 8 },
+  promptSection: { fontSize: 12, fontWeight: '700', color: '#94a3b8', marginTop: 14, marginBottom: 6 },
+  promptOption: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC', borderRadius: 10, padding: 13, marginBottom: 6,
+    borderWidth: 1, borderColor: '#E2E8F0', minHeight: 52,
+  },
+  promptRapport: { backgroundColor: '#FDF2F8', borderColor: '#FBCFE8' },
+  promptOptionText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#111827' },
+  promptOptionDo: { fontSize: 13, fontWeight: '700', color: '#1A9A8A' },
+  promptChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  promptChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#fff' },
+  promptChipOn: { backgroundColor: '#1A5276', borderColor: '#1A5276' },
+  promptChipText: { fontSize: 12.5, color: '#334155' },
+  promptChipTextOn: { color: '#fff', fontWeight: '700' },
+  promptSubmit: { backgroundColor: '#16A34A', borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 10 },
+  promptSubmitText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  promptLater: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  promptLaterText: { color: '#94a3b8', fontSize: 13 },
   headerCard: {
     backgroundColor: '#fff',
     borderRadius: 12,

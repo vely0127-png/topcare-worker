@@ -80,10 +80,20 @@ export class BleBeaconScanner {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         ]);
-        return (
+        const scanOk =
           res[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED &&
-          res[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED
-        );
+          res[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED;
+        const locOk =
+          res[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED;
+        // API 31+에서도 매니페스트에 neverForLocation을 안 쓰므로(비콘=위치 파생 목적)
+        // 위치 권한이 거부되면 스캔 결과가 조용히 0건이 된다 — 정직하게 실패 처리.
+        if (scanOk && !locOk) {
+          this.opts.onError?.(new Error(
+            '위치 권한이 거부되어 비콘이 감지되지 않습니다 — 설정 > 앱 > TopCare 종사자 > 권한에서 위치를 허용해주세요',
+          ));
+          return false;
+        }
+        return scanOk && locOk;
       }
       // API < 31: 위치 권한이 BLE 스캔의 사실상 게이트.
       const granted = await PermissionsAndroid.request(
