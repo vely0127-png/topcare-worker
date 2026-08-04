@@ -7,7 +7,10 @@ import { StatusBar } from 'expo-status-bar';
 import { QueryClientProvider } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 
+import { useQuery } from '@tanstack/react-query';
+
 import { queryClient } from '@/lib/query-client';
+import { apiFetch } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { homeRouteForRole } from '@/lib/auth/roles';
 import { initPushNotifications, unregisterPushToken } from '@/lib/notifications';
@@ -18,16 +21,27 @@ function useAuthGuard() {
   const segments = useSegments();
   const router = useRouter();
 
+  // 첫 접속 동의 게이트 (2026-08-05) — 개인정보 동의 미서명이면 /consent로.
+  // 문안 버전이 개정되면 서버가 required:true를 돌려줘 자동 재동의된다.
+  const consentGate = useQuery({
+    queryKey: ['consent-gate'],
+    queryFn: () => apiFetch<{ required: boolean }>('/api/consent?type=worker_privacy'),
+    enabled: status === 'authenticated',
+    staleTime: Infinity,
+  });
+
   useEffect(() => {
     if (status === 'loading') return;
     const group = segments[0];
     const inAuthScreen = group === 'login';
     if (status === 'unauthenticated' && !inAuthScreen) {
       router.replace('/login');
+    } else if (status === 'authenticated' && consentGate.data?.required && group !== 'consent') {
+      router.replace('/consent');
     } else if (status === 'authenticated' && (inAuthScreen || group === undefined)) {
       router.replace(homeRouteForRole(session?.user.role));
     }
-  }, [status, session, segments, router]);
+  }, [status, session, segments, router, consentGate.data]);
 
   return status;
 }
@@ -45,6 +59,7 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="login" />
+      <Stack.Screen name="consent" />
       <Stack.Screen name="(home)" />
       <Stack.Screen name="(tabs)" />
     </Stack>
