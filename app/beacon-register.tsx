@@ -99,7 +99,10 @@ export default function BeaconRegisterScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>비콘 등록</Text>
-        <Text style={styles.subtitle}>비콘의 QR을 스캔하고 설치한 호실을 선택하세요</Text>
+        <Text style={styles.subtitle}>
+          권장: 근접/출퇴근 화면에서 감지된 기기의 [등록] 버튼 사용 — QR에 적힌 값이
+          비콘이 실제로 쏘는 전파 식별자와 다르면 감지 매칭이 안 됩니다
+        </Text>
 
         {/* QR 스캔 + 수동 입력 */}
         <TouchableOpacity style={styles.scanBtn} onPress={() => setScanOpen(true)}>

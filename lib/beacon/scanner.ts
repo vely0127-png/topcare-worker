@@ -160,7 +160,8 @@ export class BleBeaconScanner {
     this.opts.onStateChange?.('scanning');
     this.manager.startDeviceScan(
       null,
-      { allowDuplicates: true, scanMode: plx.ScanMode.LowLatency },
+      // Balanced: LowLatency는 콜백 폭주로 UI 렉 + 배터리 소모 (2026-08-05)
+      { allowDuplicates: true, scanMode: plx.ScanMode.Balanced },
       (error: BleError | null, device: Device | null) => {
         if (error) {
           this.scanning = false;

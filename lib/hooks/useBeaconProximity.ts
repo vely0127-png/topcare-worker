@@ -157,9 +157,10 @@ export function useBeaconProximity(): UseBeaconProximityResult {
 
     if (!scannerRef.current) {
       scannerRef.current = new BleBeaconScanner({
+        // 관측은 엔진에만 반영 — 화면 갱신은 sweep(3초)에서 일괄 (2026-08-05 렉 수정:
+        // allowDuplicates 스캔은 초당 수십 콜백 → 매번 setState하면 JS 스레드 포화로 앱 전체 프리즈)
         onObservation: (obs) => {
           engine.observe(obs);
-          refreshStatuses();
         },
         onStateChange: (s) => setScannerState(s),
         onError: (err) => setError(err.message),
