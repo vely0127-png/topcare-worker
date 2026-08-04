@@ -60,6 +60,7 @@ function RootNavigator() {
       <Stack.Screen name="index" />
       <Stack.Screen name="login" />
       <Stack.Screen name="consent" />
+      <Stack.Screen name="beacon-register" />
       <Stack.Screen name="(home)" />
       <Stack.Screen name="(tabs)" />
     </Stack>

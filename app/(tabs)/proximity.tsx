@@ -12,7 +12,10 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { format } from 'date-fns';
+import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import { useBeaconProximity } from '@/lib/hooks/useBeaconProximity';
+import { apiFetch } from '@/lib/api/client';
 import type { ScannerState } from '@/lib/beacon';
 
 const STATE_LABEL: Record<ScannerState, { text: string; color: string }> = {
@@ -48,6 +51,14 @@ export default function ProximityScreen() {
   } = useBeaconProximity();
 
   const status = useMemo(() => STATE_LABEL[scannerState], [scannerState]);
+  const router = useRouter();
+
+  // 비콘 등록 권한(workeradmin) — 있으면 등록 진입 버튼 노출 (2026-08-05)
+  const beaconPerm = useQuery({
+    queryKey: ['beacon-permission'],
+    queryFn: () => apiFetch<{ canRegister: boolean }>('/api/beacons?permission=1'),
+    staleTime: 5 * 60 * 1000,
+  });
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -71,6 +82,17 @@ export default function ProximityScreen() {
             <Text style={styles.scanBtnText}>{scanning ? '스캔 중지' : '스캔 시작'}</Text>
           </TouchableOpacity>
         </View>
+
+        {beaconPerm.data?.canRegister && (
+          <TouchableOpacity
+            style={styles.registerEntry}
+            onPress={() => router.push('/beacon-register')}
+          >
+            <MaterialCommunityIcons name="qrcode-scan" size={18} color="#1A5276" />
+            <Text style={styles.registerEntryText}>비콘 등록 (QR 스캔)</Text>
+            <MaterialCommunityIcons name="chevron-right" size={18} color="#94a3b8" />
+          </TouchableOpacity>
+        )}
 
         {!supported && (
           <View style={styles.warnCard}>
@@ -170,6 +192,12 @@ export default function ProximityScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   content: { padding: 16, gap: 16 },
+  registerEntry: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#fff', borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: '#dbeafe',
+  },
+  registerEntryText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1A5276' },
   headerCard: {
     backgroundColor: '#fff',
     borderRadius: 12,

@@ -49,6 +49,12 @@
       "expo-secure-store",
       "expo-dev-client",
       [
+        "expo-barcode-scanner",
+        {
+          "cameraPermission": "비콘 등록을 위해 QR 코드를 스캔합니다."
+        }
+      ],
+      [
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": true,
