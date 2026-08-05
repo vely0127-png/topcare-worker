@@ -336,20 +336,42 @@ export default function ProximityScreen() {
                 || (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999))
               .map((b) => {
                 const isStrongest = strongest?.uuid === b.uuid;
-                const registered = beaconRegistry.has(b.uuid);
+                const binding = beaconRegistry.get(b.uuid);
+                const registered = Boolean(binding);
+                const residentNames = (binding?.residents ?? []).map((r) => r.name);
                 return (
-                  <View key={b.uuid} style={[styles.beaconCard, isStrongest && styles.beaconStrongest]}>
+                  <View
+                    key={b.uuid}
+                    style={[
+                      styles.beaconCard,
+                      registered && styles.beaconRegistered,
+                      isStrongest && styles.beaconStrongest,
+                    ]}
+                  >
                     <View style={[styles.insideBadge, b.inside ? styles.insideOn : styles.insideOff]}>
                       <MaterialCommunityIcons
-                        name={isStrongest ? 'map-marker-radius' : b.inside ? 'map-marker-check' : 'map-marker-outline'}
+                        name={isStrongest ? 'map-marker-radius' : registered ? 'map-marker-check' : 'bluetooth'}
                         size={16}
-                        color={isStrongest ? '#1D4ED8' : b.inside ? '#16A34A' : '#9CA3AF'}
+                        color={isStrongest ? '#1D4ED8' : registered ? '#16A34A' : '#9CA3AF'}
                       />
                     </View>
                     <View style={styles.beaconInfo}>
-                      <Text style={[styles.beaconLabel, isStrongest && styles.beaconLabelStrong]}>
-                        {b.roomLabel ?? '미등록 기기'}{isStrongest ? ' · 현재 위치' : ''}
+                      <Text style={[
+                        styles.beaconLabel,
+                        registered && styles.beaconLabelRegistered,
+                        isStrongest && styles.beaconLabelStrong,
+                      ]}>
+                        {registered ? binding!.roomLabel : '미등록 기기'}
+                        {isStrongest ? '  ⦿ 현재 위치' : registered ? '  ✓ 등록됨' : ''}
                       </Text>
+                      {registered && residentNames.length > 0 && (
+                        <Text style={styles.beaconResidents}>
+                          {residentNames.join(' · ')}
+                        </Text>
+                      )}
+                      {registered && residentNames.length === 0 && binding!.roomId && (
+                        <Text style={styles.beaconNoResident}>입소자 미배정 — 웹 설정 › 비콘에서 배정</Text>
+                      )}
                       <Text style={styles.beaconUuid} numberOfLines={1}>
                         {b.uuid}
                       </Text>
@@ -560,8 +582,12 @@ const styles = StyleSheet.create({
   locTaskTitleDone: { textDecorationLine: 'line-through', color: '#6B7280' },
   locTaskMeta: { fontSize: 11, color: '#9CA3AF', marginTop: 1 },
   locConfirm: { fontSize: 12, fontWeight: '700', color: '#1A9A8A' },
-  beaconStrongest: { borderColor: '#1D4ED8', borderWidth: 2, backgroundColor: '#EFF6FF' },
+  beaconRegistered: { borderColor: '#86EFAC', borderWidth: 1.5, backgroundColor: '#F0FDF4' },
+  beaconStrongest: { borderColor: '#1D4ED8', borderWidth: 2.5, backgroundColor: '#EFF6FF' },
+  beaconLabelRegistered: { color: '#15803D', fontWeight: '800' },
   beaconLabelStrong: { color: '#1D4ED8' },
+  beaconResidents: { fontSize: 14, fontWeight: '800', color: '#1D4ED8', marginTop: 2 },
+  beaconNoResident: { fontSize: 11, color: '#D97706', marginTop: 2 },
   scanHint: { fontSize: 12, color: '#D97706', lineHeight: 18, marginTop: 8 },
   registerChip: { backgroundColor: '#1A5276', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginLeft: 8 },
   registerChipText: { color: '#fff', fontSize: 12, fontWeight: '700' },
