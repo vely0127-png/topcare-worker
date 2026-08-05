@@ -16,6 +16,8 @@ export interface BeaconObservation {
   /** iBeacon major/minor (있으면). */
   major?: number;
   minor?: number;
+  /** 광고에 실린 기기 이름(localName) — 비콘 형식 진단·표시용 (2026-08-05). */
+  name?: string | null;
 }
 
 /** enter/exit 상태머신이 내보내는 이벤트. */
@@ -45,6 +47,8 @@ export interface BeaconStatus {
   smoothedRssi: number | null;
   /** 마지막 관측 시각(epoch ms). */
   lastSeenAt: number | null;
+  /** 광고 기기 이름(있으면) — 표시·진단용. */
+  name?: string | null;
 }
 
 /** 엔진 설정. enter/exit 임계가 다른 히스테리시스 + 디바운스. */

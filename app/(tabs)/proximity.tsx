@@ -349,18 +349,7 @@ export default function ProximityScreen() {
               <Text style={styles.nearestBtnText}>비콘을 폰에 바짝 대고 등록</Text>
             </TouchableOpacity>
           )}
-          {beacons.length === 0 ? (
-            <View>
-              <Text style={styles.empty}>아직 감지된 비콘이 없습니다.</Text>
-              {scanning && (
-                <Text style={styles.scanHint}>
-                  계속 안 잡히면 확인: ① 폰의 위치(GPS) 켜기 ② 블루투스 켜기
-                  ③ 설정 › 앱 › TopCare 종사자 › 권한에서 위치·주변기기 허용
-                </Text>
-              )}
-            </View>
-          ) : (
-            (() => {
+          {(() => {
               const sorted = [...beacons].sort((a, b) =>
                 Number(beaconRegistry.has(b.uuid)) - Number(beaconRegistry.has(a.uuid))
                 || (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999));
@@ -368,8 +357,39 @@ export default function ProximityScreen() {
               const unregistered = sorted.filter((b) => !beaconRegistry.has(b.uuid));
               const shown = [...registeredList, ...unregistered.slice(0, 5)];
               const hiddenCount = unregistered.length - Math.min(5, unregistered.length);
+              // 등록됐지만 현재 신호가 없는 비콘 — 목록에서 사라지지 않게 항상 표시 (2026-08-05)
+              const seenIds = new Set(sorted.map((b) => b.uuid));
+              const offline = beaconRegistry.all().filter((bd) => !seenIds.has(bd.uuid));
               return (
                 <>
+                  {beacons.length === 0 && (
+                    <View>
+                      <Text style={styles.empty}>아직 감지된 비콘이 없습니다.</Text>
+                      {scanning && (
+                        <Text style={styles.scanHint}>
+                          계속 안 잡히면 확인: ① 폰의 위치(GPS) 켜기 ② 블루투스 켜기
+                          ③ 설정 › 앱 › TopCare 종사자 › 권한에서 위치·주변기기 허용
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                  {offline.map((bd) => (
+                    <View key={`off-${bd.uuid}`} style={[styles.beaconCard, styles.beaconOffline]}>
+                      <View style={[styles.insideBadge, styles.insideOff]}>
+                        <MaterialCommunityIcons name="bluetooth-off" size={16} color="#9CA3AF" />
+                      </View>
+                      <View style={styles.beaconInfo}>
+                        <Text style={styles.beaconLabelOffline}>{bd.roomLabel}  · 신호 없음</Text>
+                        {(bd.residents?.length ?? 0) > 0 && (
+                          <Text style={styles.beaconResidentsOffline}>{bd.residents!.map((r) => r.name).join(' · ')}</Text>
+                        )}
+                        <Text style={styles.beaconUuid} numberOfLines={1}>{bd.uuid}</Text>
+                        <Text style={styles.beaconOfflineHint}>
+                          비콘 식별자가 바뀌었을 수 있음 — 비콘을 폰에 대고 등록 후 QR 재스캔하면 이 등록에 재연결됩니다
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
                   {shown.map((b) => {
                 const isStrongest = strongest?.uuid === b.uuid;
                 const binding = beaconRegistry.get(b.uuid);
@@ -409,7 +429,7 @@ export default function ProximityScreen() {
                         <Text style={styles.beaconNoResident}>입소자 미배정 — 웹 설정 › 비콘에서 배정</Text>
                       )}
                       <Text style={styles.beaconUuid} numberOfLines={1}>
-                        {b.uuid}
+                        {b.name ? `${b.name} · ` : ''}{b.uuid}
                       </Text>
                     </View>
                     <View style={styles.beaconRight}>
@@ -428,8 +448,7 @@ export default function ProximityScreen() {
                   )}
                 </>
               );
-            })()
-          )}
+            })()}
         </View>
 
         {/* enter/exit 이벤트 스트림 */}
@@ -630,6 +649,10 @@ const styles = StyleSheet.create({
   },
   nearestBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   hiddenNote: { fontSize: 12, color: '#9CA3AF', marginTop: 6, textAlign: 'center' },
+  beaconOffline: { opacity: 0.75, borderStyle: 'dashed', borderColor: '#CBD5E1' },
+  beaconLabelOffline: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
+  beaconResidentsOffline: { fontSize: 13, fontWeight: '700', color: '#64748B', marginTop: 1 },
+  beaconOfflineHint: { fontSize: 11, color: '#D97706', marginTop: 3, lineHeight: 15 },
   scanHint: { fontSize: 12, color: '#D97706', lineHeight: 18, marginTop: 8 },
   registerChip: { backgroundColor: '#1A5276', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginLeft: 8 },
   registerChipText: { color: '#fff', fontSize: 12, fontWeight: '700' },

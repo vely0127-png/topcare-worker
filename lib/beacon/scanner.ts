@@ -177,8 +177,12 @@ export class BleBeaconScanner {
   private handleDevice(device: Device): void {
     if (device.rssi == null) return;
     const frame = parseIBeacon(device.manufacturerData);
-    // iBeacon 이면 proximity UUID, 아니면 디바이스 id 를 식별자로.
-    const uuid = (frame?.uuid ?? device.id).toLowerCase();
+    // 식별자 (2026-08-05 MAC 랜덤화 대응):
+    //  - iBeacon 프레임이 있으면 UUID|major|minor — 유닛별 고정 식별자
+    //    (같은 모델은 UUID가 동일하고 major/minor로 유닛 구분되는 경우가 일반적)
+    //  - 없으면 디바이스 id(MAC) 폴백 — 랜덤 주소는 주기적으로 바뀌므로
+    //    QR 재연결로 보정 (등록 화면 안내 참조)
+    const uuid = (frame ? `${frame.uuid}|${frame.major}|${frame.minor}` : device.id).toLowerCase();
 
     const filter = this.opts.filterUuids?.();
     if (filter && filter.length > 0 && !filter.includes(uuid)) return;
@@ -190,6 +194,7 @@ export class BleBeaconScanner {
       measuredPower: frame?.measuredPower ?? device.txPowerLevel ?? undefined,
       major: frame?.major,
       minor: frame?.minor,
+      name: device.localName ?? device.name ?? null,
     });
   }
 
