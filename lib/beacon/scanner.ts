@@ -51,6 +51,13 @@ export class BleBeaconScanner {
   private stateSub: Subscription | null = null;
   private scanning = false;
   private readonly opts: BleScannerOptions;
+  /**
+   * MAC → iBeacon 고정 식별자 병합 맵 (2026-08-05).
+   * 같은 비콘이 iBeacon 프레임이 실린 패킷과 안 실린 패킷(스캔 응답 등)을 번갈아 보내면
+   * 두 정체(uuid|major|minor 와 MAC)로 갈라진다 — 프레임을 한 번이라도 본 MAC은
+   * 이후 프레임 없는 패킷도 고정 식별자로 귀속시킨다.
+   */
+  private macToStable = new Map<string, string>();
 
   constructor(opts: BleScannerOptions) {
     this.opts = opts;
@@ -182,7 +189,13 @@ export class BleBeaconScanner {
     //    (같은 모델은 UUID가 동일하고 major/minor로 유닛 구분되는 경우가 일반적)
     //  - 없으면 디바이스 id(MAC) 폴백 — 랜덤 주소는 주기적으로 바뀌므로
     //    QR 재연결로 보정 (등록 화면 안내 참조)
-    const uuid = (frame ? `${frame.uuid}|${frame.major}|${frame.minor}` : device.id).toLowerCase();
+    let uuid: string;
+    if (frame) {
+      uuid = `${frame.uuid}|${frame.major}|${frame.minor}`.toLowerCase();
+      this.macToStable.set(device.id, uuid);
+    } else {
+      uuid = (this.macToStable.get(device.id) ?? device.id).toLowerCase();
+    }
 
     const filter = this.opts.filterUuids?.();
     if (filter && filter.length > 0 && !filter.includes(uuid)) return;
