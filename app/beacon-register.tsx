@@ -17,7 +17,7 @@ import { syncRegistryFromServer } from '@/lib/hooks/useBeaconProximity';
 
 interface RoomOpt { id: string; number: string; floor?: number | null }
 interface BeaconRow {
-  id: string; beaconId: string; label: string | null; isActive: boolean;
+  id: string; beaconId: string; qrCode: string | null; label: string | null; isActive: boolean;
   room: { number: string } | null;
   residents: { id: string; name: string }[];
 }
@@ -28,6 +28,7 @@ export default function BeaconRegisterScreen() {
   // 근접 화면에서 감지된 미등록 비콘의 식별자를 프리필 (QR값≠전파 식별자 문제의 현장 해법)
   const params = useLocalSearchParams<{ uuid?: string }>();
   const [beaconId, setBeaconId] = useState(typeof params.uuid === 'string' ? params.uuid : '');
+  const [qrCode, setQrCode] = useState('');
   const [roomId, setRoomId] = useState('');
   const [label, setLabel] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
@@ -56,15 +57,27 @@ export default function BeaconRegisterScreen() {
   }, [scanOpen]);
 
   async function submit() {
-    if (!beaconId.trim()) { Alert.alert('입력 필요', '비콘 QR을 스캔하거나 ID를 입력해주세요'); return; }
+    if (!beaconId.trim()) { Alert.alert('입력 필요', '감지된 기기의 [등록]으로 진입하거나 전파 식별자를 입력해주세요'); return; }
     setSubmitting(true);
     try {
-      await apiFetch('/api/beacons', {
+      const res = await apiFetch<{ relinked?: boolean; qrAttached?: boolean }>('/api/beacons', {
         method: 'POST',
-        body: { beaconId: beaconId.trim(), roomId: roomId || undefined, label: label.trim() || undefined },
+        body: {
+          beaconId: beaconId.trim(),
+          qrCode: qrCode.trim() || undefined,
+          roomId: roomId || undefined,
+          label: label.trim() || undefined,
+        },
       });
-      Alert.alert('등록 완료', `비콘이 등록되었습니다${roomId ? '' : ' (공용부 — 호실은 웹에서 지정 가능)'}`);
-      setBeaconId(''); setLabel(''); setRoomId('');
+      Alert.alert(
+        res?.relinked ? '재연결 완료' : res?.qrAttached ? 'QR 부착 완료' : '등록 완료',
+        res?.relinked
+          ? '기존 등록(호실·입소자)에 새 전파 식별자를 연결했습니다'
+          : res?.qrAttached
+            ? '등록된 비콘에 QR 자산 번호를 붙였습니다'
+            : `비콘이 등록되었습니다${roomId ? '' : ' (공용부 — 호실은 웹에서 지정 가능)'}`,
+      );
+      setBeaconId(''); setQrCode(''); setLabel(''); setRoomId('');
       await queryClient.invalidateQueries({ queryKey: ['beacons'] });
       await syncRegistryFromServer(); // 스캔 레지스트리 즉시 반영 (재시작 불필요)
     } catch (e) {
@@ -100,22 +113,35 @@ export default function BeaconRegisterScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>비콘 등록</Text>
         <Text style={styles.subtitle}>
-          권장: 근접/출퇴근 화면에서 감지된 기기의 [등록] 버튼 사용 — QR에 적힌 값이
-          비콘이 실제로 쏘는 전파 식별자와 다르면 감지 매칭이 안 됩니다
+          ① 근접 화면에서 감지된 기기의 [등록]으로 전파 식별자를 가져오고
+          ② 비콘의 QR을 스캔해 자산 번호를 붙이세요 — 전파 식별자가 바뀌어도
+          QR 재스캔으로 같은 등록(호실·입소자)에 재연결됩니다
         </Text>
 
-        {/* QR 스캔 + 수동 입력 */}
-        <TouchableOpacity style={styles.scanBtn} onPress={() => setScanOpen(true)}>
-          <MaterialCommunityIcons name="qrcode-scan" size={20} color="#fff" />
-          <Text style={styles.scanBtnText}>QR 코드 스캔</Text>
-        </TouchableOpacity>
+        {/* ① 전파 식별자 — 감지 목록 [등록]에서 자동 입력 */}
+        <Text style={styles.label}>① 전파 식별자 (감지된 값)</Text>
         <TextInput
           style={styles.input}
-          placeholder="비콘 ID (QR 스캔 시 자동 입력)"
+          placeholder="근접 화면의 [등록] 버튼으로 자동 입력"
           autoCapitalize="none"
           autoCorrect={false}
           value={beaconId}
           onChangeText={setBeaconId}
+        />
+
+        {/* ② QR 자산 번호 */}
+        <Text style={styles.label}>② QR 자산 번호 (권장)</Text>
+        <TouchableOpacity style={styles.scanBtn} onPress={() => setScanOpen(true)}>
+          <MaterialCommunityIcons name="qrcode-scan" size={20} color="#fff" />
+          <Text style={styles.scanBtnText}>비콘 QR 코드 스캔</Text>
+        </TouchableOpacity>
+        <TextInput
+          style={styles.input}
+          placeholder="QR 값 (스캔 시 자동 입력)"
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={qrCode}
+          onChangeText={setQrCode}
         />
 
         {/* 호실 선택 */}
@@ -167,6 +193,7 @@ export default function BeaconRegisterScreen() {
               <Text style={styles.beaconMeta}>
                 {b.room ? `${b.room.number}호` : '공용부'}
                 {b.label ? ` · ${b.label}` : ''}
+                {b.qrCode ? ` · QR ${b.qrCode.slice(0, 12)}` : ''}
                 {b.residents.length > 0 ? ` · ${b.residents.map((r) => r.name).join(', ')}` : ''}
               </Text>
             </View>
@@ -187,7 +214,7 @@ export default function BeaconRegisterScreen() {
             <BarCodeScanner
               style={StyleSheet.absoluteFillObject}
               onBarCodeScanned={({ data }) => {
-                setBeaconId(String(data ?? '').trim());
+                setQrCode(String(data ?? '').trim());
                 setScanOpen(false);
               }}
             />
