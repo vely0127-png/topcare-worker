@@ -27,11 +27,11 @@ const WINDOW_BEFORE_MIN = 120;
 const WINDOW_AFTER_MIN = 30;
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
-// ── 체류 프롬프트 (2026-08-05): 같은 비콘에 오래 머물면 "무슨 서비스?" 질문 ──
-// 임계·쿨다운은 실비콘 테스트로 튜닝 예정(추정값).
-const DWELL_PROMPT_MS = 3 * 60_000;   // 3분 체류 시 질문
-const DWELL_COOLDOWN_MS = 20 * 60_000; // 같은 비콘 재질문 최소 간격
-const DWELL_TICK_MS = 10_000;
+// ── 체류 프롬프트 (2026-08-05): 같은 비콘에 머물면 "무슨 서비스?" 질문 ──
+// PoC 튜닝(대표 지시): 30초 체류 시 질문, 재질문 간격 3분. 거리 임계는 현장 조절 예정.
+const DWELL_PROMPT_MS = 30_000;       // 30초 체류 시 질문
+const DWELL_COOLDOWN_MS = 3 * 60_000; // 같은 비콘 재질문 최소 간격
+const DWELL_TICK_MS = 5_000;
 
 const STATE_LABEL: Record<ScannerState, { text: string; color: string }> = {
   idle: { text: '대기', color: '#6B7280' },
