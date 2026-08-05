@@ -63,6 +63,7 @@ export default function ProximityScreen() {
     error,
     start,
     stop,
+    getStatuses,
     strongest,
     currentBinding,
   } = useBeaconProximity();
@@ -158,25 +159,42 @@ export default function ProximityScreen() {
 
   // ── 가장 가까운 미등록 기기 원버튼 등록 (2026-08-05) ──
   // 미등록 기기가 수십 개일 때 행별 [등록]은 어느 것이 비콘인지 알 수 없어 무의미.
-  // 등록할 비콘을 폰에 바짝 대면(≈1.5m 이내 최강 신호) 그 기기를 자동 선택한다.
+  // 방금 갖다 댄 비콘(새 랜덤 MAC 포함)은 관측·스무딩에 몇 초 걸리므로,
+  // 엔진 실시간 스냅샷(getStatuses)을 6초간 재탐색해 1.5m 이내 최강 기기를 잡는다.
   const NEAR_REGISTER_MAX_M = 1.5;
-  const registerNearest = () => {
-    const now = Date.now();
-    const candidates = beacons
-      .filter((b) => b.lastSeenAt != null && now - b.lastSeenAt <= 15_000
-        && b.smoothedRssi != null && !beaconRegistry.has(b.uuid))
-      .sort((a, b) => (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999));
-    const top = candidates[0];
-    if (!top) { Alert.alert('감지된 미등록 기기 없음', '스캔이 켜져 있는지 확인해주세요'); return; }
-    const dist = top.distanceMeters;
-    if (dist == null || dist > NEAR_REGISTER_MAX_M) {
+  const NEAR_SEARCH_MS = 6_000;
+  const [nearSearching, setNearSearching] = useState(false);
+  const registerNearest = async () => {
+    if (nearSearching) return;
+    setNearSearching(true);
+    try {
+      let bestDist: number | null = null;
+      const deadline = Date.now() + NEAR_SEARCH_MS;
+      while (Date.now() < deadline) {
+        const now = Date.now();
+        const candidates = getStatuses()
+          .filter((b) => b.lastSeenAt != null && now - b.lastSeenAt <= 15_000
+            && b.smoothedRssi != null && !beaconRegistry.has(b.uuid))
+          .sort((a, b) => (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999));
+        const top = candidates[0];
+        if (top?.distanceMeters != null) {
+          bestDist = bestDist == null ? top.distanceMeters : Math.min(bestDist, top.distanceMeters);
+          if (top.distanceMeters <= NEAR_REGISTER_MAX_M) {
+            router.push({ pathname: '/beacon-register', params: { uuid: top.uuid } });
+            return;
+          }
+        }
+        await new Promise((r) => setTimeout(r, 400));
+      }
       Alert.alert(
         '비콘을 더 가까이',
-        `등록할 비콘을 폰에 바짝(손바닥 거리) 대고 다시 눌러주세요.\n현재 가장 가까운 미등록 기기: ${dist != null ? `${dist.toFixed(1)}m` : '거리 미상'}`,
+        bestDist == null
+          ? '미등록 기기가 감지되지 않았습니다 — 스캔이 켜져 있는지 확인해주세요'
+          : `등록할 비콘을 폰에 바짝(손바닥 거리) 댄 상태로 다시 눌러주세요.\n탐색 중 가장 가까웠던 미등록 기기: ${bestDist.toFixed(1)}m`,
       );
-      return;
+    } finally {
+      setNearSearching(false);
     }
-    router.push({ pathname: '/beacon-register', params: { uuid: top.uuid } });
   };
 
   /** 시간표 외 업무·라뽀 즉석 기록 — source='beacon'으로 추적 가능하게 */
@@ -344,9 +362,13 @@ export default function ProximityScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>감지된 비콘 ({beacons.length})</Text>
           {scanning && beaconPerm.data?.canRegister && (
-            <TouchableOpacity style={styles.nearestBtn} onPress={registerNearest}>
-              <MaterialCommunityIcons name="cellphone-nfc" size={18} color="#fff" />
-              <Text style={styles.nearestBtnText}>비콘을 폰에 바짝 대고 등록</Text>
+            <TouchableOpacity style={[styles.nearestBtn, nearSearching && { opacity: 0.7 }]} onPress={() => void registerNearest()} disabled={nearSearching}>
+              {nearSearching
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <MaterialCommunityIcons name="cellphone-nfc" size={18} color="#fff" />}
+              <Text style={styles.nearestBtnText}>
+                {nearSearching ? '가까운 비콘 찾는 중… (비콘을 대고 계세요)' : '비콘을 폰에 바짝 대고 등록'}
+              </Text>
             </TouchableOpacity>
           )}
           {(() => {

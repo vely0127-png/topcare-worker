@@ -82,6 +82,8 @@ export interface UseBeaconProximityResult {
   error: string | null;
   start: () => void;
   stop: () => void;
+  /** 엔진의 실시간 상태 스냅샷 — 3초 주기 state와 달리 즉시값 (근접 등록 재탐색용) */
+  getStatuses: () => BeaconStatus[];
   /** 최근(15초) 관측 중 신호가 가장 센 비콘 = 현재 위치 후보 (2026-08-05) */
   strongest: BeaconStatus | null;
   /** strongest의 등록부 정보 — 호실 라벨·해당 위치 입소자 */
@@ -222,6 +224,8 @@ export function useBeaconProximity(): UseBeaconProximityResult {
     [strongest],
   );
 
+  const getStatuses = useCallback((): BeaconStatus[] => engineRef.current?.statuses() ?? [], []);
+
   return {
     supported,
     scannerState,
@@ -232,6 +236,7 @@ export function useBeaconProximity(): UseBeaconProximityResult {
     error,
     start,
     stop,
+    getStatuses,
     strongest,
     currentBinding,
   };
