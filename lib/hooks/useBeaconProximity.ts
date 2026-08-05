@@ -52,7 +52,10 @@ export async function syncRegistryFromServer(): Promise<void> {
       .map((b) => ({
         uuid: b.beaconId,
         roomId: b.room?.id ?? null,
-        roomLabel: b.room ? `${b.room.number}호` : (b.label ?? '공용부'),
+        // 라벨을 표시에 포함 — 같은 호실에 비콘이 여러 개일 때(1번·2번) 구분 (2026-08-05)
+        roomLabel: b.room
+          ? `${b.room.number}호${b.label ? ` · ${b.label}` : ''}`
+          : (b.label ?? '공용부'),
         primary: (b.label ?? '').includes('정문'),
         residents: b.residents ?? [],
       }));

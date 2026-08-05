@@ -156,6 +156,29 @@ export default function ProximityScreen() {
     return { primary: undone[0] ?? null, rest: undone.slice(1, 7) };
   }, [currentBinding, tasks.rows, tasks.provisionFor]);
 
+  // ── 가장 가까운 미등록 기기 원버튼 등록 (2026-08-05) ──
+  // 미등록 기기가 수십 개일 때 행별 [등록]은 어느 것이 비콘인지 알 수 없어 무의미.
+  // 등록할 비콘을 폰에 바짝 대면(≈1.5m 이내 최강 신호) 그 기기를 자동 선택한다.
+  const NEAR_REGISTER_MAX_M = 1.5;
+  const registerNearest = () => {
+    const now = Date.now();
+    const candidates = beacons
+      .filter((b) => b.lastSeenAt != null && now - b.lastSeenAt <= 15_000
+        && b.smoothedRssi != null && !beaconRegistry.has(b.uuid))
+      .sort((a, b) => (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999));
+    const top = candidates[0];
+    if (!top) { Alert.alert('감지된 미등록 기기 없음', '스캔이 켜져 있는지 확인해주세요'); return; }
+    const dist = top.distanceMeters;
+    if (dist == null || dist > NEAR_REGISTER_MAX_M) {
+      Alert.alert(
+        '비콘을 더 가까이',
+        `등록할 비콘을 폰에 바짝(손바닥 거리) 대고 다시 눌러주세요.\n현재 가장 가까운 미등록 기기: ${dist != null ? `${dist.toFixed(1)}m` : '거리 미상'}`,
+      );
+      return;
+    }
+    router.push({ pathname: '/beacon-register', params: { uuid: top.uuid } });
+  };
+
   /** 시간표 외 업무·라뽀 즉석 기록 — source='beacon'으로 추적 가능하게 */
   const recordAdhoc = async (serviceType: string, note: string, residentId: string) => {
     setAdhocBusy(true);
@@ -317,9 +340,15 @@ export default function ProximityScreen() {
           </View>
         )}
 
-        {/* 감지된 비콘 — 등록 비콘 우선, 미등록은 현장 등록 가능 */}
+        {/* 감지된 비콘 — 등록 비콘 우선, 미등록은 가까운 5개만 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>감지된 비콘 ({beacons.length})</Text>
+          {scanning && beaconPerm.data?.canRegister && (
+            <TouchableOpacity style={styles.nearestBtn} onPress={registerNearest}>
+              <MaterialCommunityIcons name="cellphone-nfc" size={18} color="#fff" />
+              <Text style={styles.nearestBtnText}>비콘을 폰에 바짝 대고 등록</Text>
+            </TouchableOpacity>
+          )}
           {beacons.length === 0 ? (
             <View>
               <Text style={styles.empty}>아직 감지된 비콘이 없습니다.</Text>
@@ -331,10 +360,17 @@ export default function ProximityScreen() {
               )}
             </View>
           ) : (
-            [...beacons]
-              .sort((a, b) => Number(beaconRegistry.has(b.uuid)) - Number(beaconRegistry.has(a.uuid))
-                || (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999))
-              .map((b) => {
+            (() => {
+              const sorted = [...beacons].sort((a, b) =>
+                Number(beaconRegistry.has(b.uuid)) - Number(beaconRegistry.has(a.uuid))
+                || (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999));
+              const registeredList = sorted.filter((b) => beaconRegistry.has(b.uuid));
+              const unregistered = sorted.filter((b) => !beaconRegistry.has(b.uuid));
+              const shown = [...registeredList, ...unregistered.slice(0, 5)];
+              const hiddenCount = unregistered.length - Math.min(5, unregistered.length);
+              return (
+                <>
+                  {shown.map((b) => {
                 const isStrongest = strongest?.uuid === b.uuid;
                 const binding = beaconRegistry.get(b.uuid);
                 const registered = Boolean(binding);
@@ -382,17 +418,17 @@ export default function ProximityScreen() {
                         {b.smoothedRssi != null ? `${b.smoothedRssi.toFixed(0)} dBm` : '—'}
                       </Text>
                     </View>
-                    {!registered && beaconPerm.data?.canRegister && (
-                      <TouchableOpacity
-                        style={styles.registerChip}
-                        onPress={() => router.push({ pathname: '/beacon-register', params: { uuid: b.uuid } })}
-                      >
-                        <Text style={styles.registerChipText}>등록</Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 );
-              })
+                  })}
+                  {hiddenCount > 0 && (
+                    <Text style={styles.hiddenNote}>
+                      미등록 기기 {hiddenCount}개 더 감지됨 — 등록은 비콘을 폰에 대고 위 버튼으로
+                    </Text>
+                  )}
+                </>
+              );
+            })()
           )}
         </View>
 
@@ -588,6 +624,12 @@ const styles = StyleSheet.create({
   beaconLabelStrong: { color: '#1D4ED8' },
   beaconResidents: { fontSize: 14, fontWeight: '800', color: '#1D4ED8', marginTop: 2 },
   beaconNoResident: { fontSize: 11, color: '#D97706', marginTop: 2 },
+  nearestBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#1A5276', borderRadius: 10, paddingVertical: 13, marginBottom: 10,
+  },
+  nearestBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  hiddenNote: { fontSize: 12, color: '#9CA3AF', marginTop: 6, textAlign: 'center' },
   scanHint: { fontSize: 12, color: '#D97706', lineHeight: 18, marginTop: 8 },
   registerChip: { backgroundColor: '#1A5276', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginLeft: 8 },
   registerChipText: { color: '#fff', fontSize: 12, fontWeight: '700' },
