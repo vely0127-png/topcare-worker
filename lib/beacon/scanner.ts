@@ -171,8 +171,9 @@ export class BleBeaconScanner {
     this.opts.onStateChange?.('scanning');
     this.manager.startDeviceScan(
       null,
-      // Balanced: LowLatency는 콜백 폭주로 UI 렉 + 배터리 소모 (2026-08-05)
-      { allowDuplicates: true, scanMode: plx.ScanMode.Balanced },
+      // LowLatency 복귀 (2026-08-05): Balanced는 삼성 기기에서 감지 누락·지연 —
+      // 렉의 실제 원인(관측마다 리렌더)은 관측/렌더 분리로 이미 해결됨
+      { allowDuplicates: true, scanMode: plx.ScanMode.LowLatency },
       (error: BleError | null, device: Device | null) => {
         if (error) {
           this.scanning = false;
