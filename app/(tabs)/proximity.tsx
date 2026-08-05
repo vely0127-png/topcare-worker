@@ -145,6 +145,17 @@ export default function ProximityScreen() {
     return () => clearInterval(timer);
   }, [scanning, promptOpen, currentBinding]);
 
+  // 체류 프롬프트용 업무 정렬: 현재 시각과 가장 가까운 미완료 업무가 최우선 (2026-08-05)
+  const promptTasks = useMemo(() => {
+    const residentIds = new Set((currentBinding?.residents ?? []).map((r) => r.id));
+    if (residentIds.size === 0) return { primary: null as DisplayRow | null, rest: [] as DisplayRow[] };
+    const nowMin = toMin(kstNowHHMM());
+    const undone = tasks.rows
+      .filter((r) => residentIds.has(r.residentId) && r.plannedStart && !tasks.provisionFor(r))
+      .sort((a, b) => Math.abs(toMin(a.plannedStart!) - nowMin) - Math.abs(toMin(b.plannedStart!) - nowMin));
+    return { primary: undone[0] ?? null, rest: undone.slice(1, 7) };
+  }, [currentBinding, tasks.rows, tasks.provisionFor]);
+
   /** 시간표 외 업무·라뽀 즉석 기록 — source='beacon'으로 추적 가능하게 */
   const recordAdhoc = async (serviceType: string, note: string, residentId: string) => {
     setAdhocBusy(true);
@@ -397,14 +408,48 @@ export default function ProximityScreen() {
             <Text style={styles.promptTitle}>
               {currentBinding?.roomLabel ?? '이 위치'}에 {dwellMinutes}분째 머무르는 중
             </Text>
+            {/* 이 위치의 입소자 — 웹 등록 이름 하이라이트 */}
+            <View style={styles.promptResidents}>
+              {(currentBinding?.residents ?? []).map((r) => (
+                <View key={r.id} style={styles.promptResidentChip}>
+                  <Text style={styles.promptResidentName}>{r.name}</Text>
+                </View>
+              ))}
+            </View>
             <Text style={styles.promptSub}>어떤 서비스를 제공하고 계신가요?</Text>
 
-            <ScrollView style={{ maxHeight: 380 }}>
-              {/* ① 시간표 업무 */}
-              {locationRows.now.filter((r) => !tasks.provisionFor(r)).length > 0 && (
+            <ScrollView style={{ maxHeight: 400 }}>
+              {/* ① 지금 시각과 가장 가까운 업무 — 최우선 강조 */}
+              {promptTasks.primary && (
                 <>
-                  <Text style={styles.promptSection}>시간표 업무</Text>
-                  {locationRows.now.filter((r) => !tasks.provisionFor(r)).map((row) => (
+                  <Text style={styles.promptSection}>지금 할 업무</Text>
+                  <TouchableOpacity
+                    style={styles.promptPrimary}
+                    disabled={tasks.pendingKeys.has(promptTasks.primary.key)}
+                    onPress={() => { onCheck(promptTasks.primary!); setPromptOpen(false); }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.promptPrimaryType}>
+                        {serviceTypeLabel(promptTasks.primary.serviceType)}
+                        <Text style={styles.promptPrimaryTime}>  {promptTasks.primary.plannedStart}</Text>
+                      </Text>
+                      <Text style={styles.promptPrimaryText}>
+                        <Text style={styles.promptNameHl}>{promptTasks.primary.residentName}</Text>
+                        {'  '}{promptTasks.primary.note || serviceTypeLabel(promptTasks.primary.serviceType)}
+                      </Text>
+                    </View>
+                    <View style={styles.promptPrimaryBtn}>
+                      <Text style={styles.promptPrimaryBtnText}>진행함</Text>
+                    </View>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ② 나머지 시간표 업무 — 아래에서 선택 */}
+              {promptTasks.rest.length > 0 && (
+                <>
+                  <Text style={styles.promptSection}>다른 시간대 업무</Text>
+                  {promptTasks.rest.map((row) => (
                     <TouchableOpacity
                       key={row.key}
                       style={styles.promptOption}
@@ -412,7 +457,7 @@ export default function ProximityScreen() {
                       onPress={() => { onCheck(row); setPromptOpen(false); }}
                     >
                       <Text style={styles.promptOptionText}>
-                        {row.plannedStart} {row.residentName} — {row.note || serviceTypeLabel(row.serviceType)}
+                        {row.plannedStart}  <Text style={styles.promptNameHl}>{row.residentName}</Text> — {row.note || serviceTypeLabel(row.serviceType)}
                       </Text>
                       <Text style={styles.promptOptionDo}>진행함</Text>
                     </TouchableOpacity>
@@ -420,7 +465,7 @@ export default function ProximityScreen() {
                 </>
               )}
 
-              {/* ② 라뽀 (대화·놀이) */}
+              {/* ③ 라뽀 (대화·놀이) */}
               <Text style={styles.promptSection}>라뽀 (대화·놀이)</Text>
               {(currentBinding?.residents ?? []).map((r) => (
                 <TouchableOpacity
@@ -434,7 +479,7 @@ export default function ProximityScreen() {
                 </TouchableOpacity>
               ))}
 
-              {/* ③ 다른 업무 */}
+              {/* ④ 시간표에 없는 업무 */}
               <Text style={styles.promptSection}>다른 업무</Text>
               <View style={styles.promptChips}>
                 {SERVICE_TYPES.map((t) => (
@@ -543,6 +588,20 @@ const styles = StyleSheet.create({
   promptSubmitText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   promptLater: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
   promptLaterText: { color: '#94a3b8', fontSize: 13 },
+  promptResidents: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  promptResidentChip: { backgroundColor: '#EFF6FF', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#BFDBFE' },
+  promptResidentName: { fontSize: 14, fontWeight: '800', color: '#1D4ED8' },
+  promptNameHl: { fontWeight: '800', color: '#1D4ED8' },
+  promptPrimary: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F0FDFA', borderRadius: 12, padding: 16,
+    borderWidth: 2, borderColor: '#1A9A8A', minHeight: 72,
+  },
+  promptPrimaryType: { fontSize: 13, fontWeight: '700', color: '#0F766E' },
+  promptPrimaryTime: { fontSize: 13, fontWeight: '600', color: '#64748b' },
+  promptPrimaryText: { fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 3 },
+  promptPrimaryBtn: { backgroundColor: '#1A9A8A', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  promptPrimaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
   headerCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
