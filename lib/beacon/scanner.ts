@@ -11,8 +11,10 @@
  */
 import { PermissionsAndroid, Platform } from 'react-native';
 import type { BleError, BleManager, Device, State, Subscription } from 'react-native-ble-plx';
-import { parseIBeacon } from './ibeacon';
+import { parseIBeacon, parseEddystoneUid, base64ToBytes } from './ibeacon';
 import type { BeaconObservation } from './types';
+
+const hex = (bytes: number[]) => bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
 
 export type ScannerState =
   | 'idle'
@@ -58,6 +60,8 @@ export class BleBeaconScanner {
    * 이후 프레임 없는 패킷도 고정 식별자로 귀속시킨다.
    */
   private macToStable = new Map<string, string>();
+  /** 새 식별자 최초 감지 시 1회만 logcat 출력 (Android Studio Logcat 진단용). */
+  private loggedIds = new Set<string>();
 
   constructor(opts: BleScannerOptions) {
     this.opts = opts;
@@ -184,14 +188,17 @@ export class BleBeaconScanner {
   private handleDevice(device: Device): void {
     if (device.rssi == null) return;
     const frame = parseIBeacon(device.manufacturerData);
-    // 식별자 (2026-08-05 MAC 랜덤화 대응):
-    //  - iBeacon 프레임이 있으면 UUID|major|minor — 유닛별 고정 식별자
-    //    (같은 모델은 UUID가 동일하고 major/minor로 유닛 구분되는 경우가 일반적)
-    //  - 없으면 디바이스 id(MAC) 폴백 — 랜덤 주소는 주기적으로 바뀌므로
-    //    QR 재연결로 보정 (등록 화면 안내 참조)
+    const eddy = frame ? null : parseEddystoneUid(device.serviceData as Record<string, string> | null);
+    // 식별자 우선순위 (2026-08-05 MAC 랜덤화 대응):
+    //  ① iBeacon: UUID|major|minor  ② Eddystone UID: eddy:namespace:instance
+    //  ③ 같은 MAC에서 ①/②를 본 적 있으면 그 고정 식별자로 귀속(패킷 병합)
+    //  ④ MAC 폴백 — 랜덤 주소는 순환하므로 QR 재연결로 보정
     let uuid: string;
     if (frame) {
       uuid = `${frame.uuid}|${frame.major}|${frame.minor}`.toLowerCase();
+      this.macToStable.set(device.id, uuid);
+    } else if (eddy) {
+      uuid = `eddy:${eddy.namespace}:${eddy.instance}`.toLowerCase();
       this.macToStable.set(device.id, uuid);
     } else {
       uuid = (this.macToStable.get(device.id) ?? device.id).toLowerCase();
@@ -200,14 +207,26 @@ export class BleBeaconScanner {
     const filter = this.opts.filterUuids?.();
     if (filter && filter.length > 0 && !filter.includes(uuid)) return;
 
+    // 광고 원본 요약 — 미확인 비콘 형식 진단용 (행 길게 누르면 표시)
+    const mfgHex = hex(base64ToBytes(device.manufacturerData));
+    const sdKeys = device.serviceData ? Object.keys(device.serviceData).join(',') : '';
+    const raw = `name=${device.localName ?? device.name ?? '-'}\nmfg=${mfgHex || '-'}\nserviceData=${sdKeys || '-'}\nsvcUUIDs=${(device.serviceUUIDs ?? []).join(',') || '-'}\nmac=${device.id}`;
+
+    // Logcat 진단 — 새 식별자 최초 1회: adb logcat에서 'BEACON_DIAG' 필터
+    if (!this.loggedIds.has(uuid)) {
+      this.loggedIds.add(uuid);
+      console.log(`[BEACON_DIAG] id=${uuid} rssi=${device.rssi} ${raw.replace(/\n/g, ' ')}`);
+    }
+
     this.opts.onObservation({
       uuid,
       rssi: device.rssi,
       timestamp: Date.now(),
-      measuredPower: frame?.measuredPower ?? device.txPowerLevel ?? undefined,
+      measuredPower: frame?.measuredPower ?? eddy?.txPower ?? device.txPowerLevel ?? undefined,
       major: frame?.major,
       minor: frame?.minor,
       name: device.localName ?? device.name ?? null,
+      raw,
     });
   }
 

@@ -35,6 +35,8 @@ interface BeaconRuntime {
   measuredPower?: number;
   /** 광고 기기 이름(있으면) — 표시·진단용. */
   name?: string | null;
+  /** 광고 원본 요약 — 진단용. */
+  raw?: string | null;
   lastDistance: number | null;
   lastSmoothedRssi: number | null;
   lastSeenAt: number | null;
@@ -97,6 +99,7 @@ export class ProximityEngine {
     rt.lastDistance = dist;
     rt.lastSeenAt = obs.timestamp;
     if (obs.name) rt.name = obs.name;
+    if (obs.raw) rt.raw = obs.raw;
 
     this.evaluate(rt, dist, obs.timestamp);
   }
@@ -132,6 +135,7 @@ export class ProximityEngine {
         smoothedRssi: rt.lastSmoothedRssi,
         lastSeenAt: rt.lastSeenAt,
         name: rt.name ?? null,
+        raw: rt.raw ?? null,
       };
     });
   }

@@ -418,8 +418,10 @@ export default function ProximityScreen() {
                 const registered = Boolean(binding);
                 const residentNames = (binding?.residents ?? []).map((r) => r.name);
                 return (
-                  <View
+                  <TouchableOpacity
                     key={b.uuid}
+                    activeOpacity={0.9}
+                    onLongPress={() => Alert.alert('광고 원본 (진단)', `식별자: ${b.uuid}\n\n${b.raw ?? '원본 정보 없음'}`)}
                     style={[
                       styles.beaconCard,
                       registered && styles.beaconRegistered,
@@ -460,7 +462,7 @@ export default function ProximityScreen() {
                         {b.smoothedRssi != null ? `${b.smoothedRssi.toFixed(0)} dBm` : '—'}
                       </Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
                   })}
                   {hiddenCount > 0 && (

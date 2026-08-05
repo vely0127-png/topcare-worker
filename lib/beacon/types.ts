@@ -18,6 +18,8 @@ export interface BeaconObservation {
   minor?: number;
   /** 광고에 실린 기기 이름(localName) — 비콘 형식 진단·표시용 (2026-08-05). */
   name?: string | null;
+  /** 광고 원본 요약(제조사 데이터 hex·서비스 데이터 키 등) — 미확인 형식 진단용. */
+  raw?: string;
 }
 
 /** enter/exit 상태머신이 내보내는 이벤트. */
@@ -49,6 +51,8 @@ export interface BeaconStatus {
   lastSeenAt: number | null;
   /** 광고 기기 이름(있으면) — 표시·진단용. */
   name?: string | null;
+  /** 광고 원본 요약 — 행 길게 누르면 표시(형식 진단). */
+  raw?: string | null;
 }
 
 /** 엔진 설정. enter/exit 임계가 다른 히스테리시스 + 디바운스. */

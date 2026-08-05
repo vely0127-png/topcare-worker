@@ -100,3 +100,31 @@ export function parseIBeacon(manufacturerData: string | null | undefined): IBeac
 export function normalizeUuid(uuid: string): string {
   return uuid.trim().toLowerCase();
 }
+
+// ── Eddystone UID (2026-08-05) ─────────────────────────────
+// 중국계 비콘 다수가 iBeacon 대신/함께 Eddystone을 쏜다.
+// 서비스 데이터 0xFEAA, 프레임타입 0x00(UID): [0]=0x00 [1]=txPower
+// [2..11]=namespace(10B, 고정) [12..17]=instance(6B, 유닛별 고정)
+// → MAC 랜덤화와 무관한 고정 식별자.
+
+export interface EddystoneUidFrame {
+  namespace: string; // hex 20자
+  instance: string;  // hex 12자
+  txPower: number;
+}
+
+/** Device.serviceData(맵: uuid→base64) → Eddystone UID 프레임. 없으면 null. */
+export function parseEddystoneUid(
+  serviceData: Record<string, string> | null | undefined,
+): EddystoneUidFrame | null {
+  if (!serviceData) return null;
+  const key = Object.keys(serviceData).find((k) => k.toLowerCase().includes('feaa'));
+  if (!key) return null;
+  const bytes = base64ToBytes(serviceData[key]);
+  if (bytes.length < 18 || bytes[0] !== 0x00) return null;
+  return {
+    txPower: int8(bytes[1]),
+    namespace: toHex(bytes.slice(2, 12)),
+    instance: toHex(bytes.slice(12, 18)),
+  };
+}
