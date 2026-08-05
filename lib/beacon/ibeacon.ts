@@ -96,9 +96,13 @@ export function parseIBeacon(manufacturerData: string | null | undefined): IBeac
   };
 }
 
-/** UUID 비교용 정규화(소문자, 하이픈 제거 후 재포맷 허용). */
+/**
+ * 식별자 비교용 정규화 (2026-08-05): 소문자 + 구분자(콜론·하이픈 등) 제거.
+ * HolyIOT 등은 QR에 인쇄된 값(45C66AF31951)이 곧 고정 MAC(45:C6:6A:F3:19:51)이라
+ * 콜론만 무시하면 QR 등록값과 전파 MAC이 그대로 일치한다.
+ */
 export function normalizeUuid(uuid: string): string {
-  return uuid.trim().toLowerCase();
+  return uuid.trim().toLowerCase().replace(/[^0-9a-z]/g, '');
 }
 
 // ── Eddystone UID (2026-08-05) ─────────────────────────────

@@ -113,9 +113,9 @@ export default function BeaconRegisterScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>비콘 등록</Text>
         <Text style={styles.subtitle}>
-          ① 근접 화면에서 감지된 기기의 [등록]으로 전파 식별자를 가져오고
-          ② 비콘의 QR을 스캔해 자산 번호를 붙이세요 — 전파 식별자가 바뀌어도
-          QR 재스캔으로 같은 등록(호실·입소자)에 재연결됩니다
+          비콘의 QR을 스캔하면 끝 — QR 인쇄값이 곧 비콘의 고정 주소(MAC)라
+          자동으로 감지 매칭됩니다 (콜론 유무 무시). 근접 화면 [등록]으로
+          들어오면 전파 식별자가 미리 채워집니다.
         </Text>
 
         {/* ① 전파 식별자 — 감지 목록 [등록]에서 자동 입력 */}
@@ -214,7 +214,10 @@ export default function BeaconRegisterScreen() {
             <BarCodeScanner
               style={StyleSheet.absoluteFillObject}
               onBarCodeScanned={({ data }) => {
-                setQrCode(String(data ?? '').trim());
+                const v = String(data ?? '').trim();
+                setQrCode(v);
+                // HolyIOT: QR 인쇄값 = 고정 MAC — 전파 식별자로도 그대로 사용 (콜론 무시 매칭)
+                setBeaconId((prev) => prev || v);
                 setScanOpen(false);
               }}
             />

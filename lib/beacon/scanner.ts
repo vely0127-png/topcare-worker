@@ -189,20 +189,11 @@ export class BleBeaconScanner {
     if (device.rssi == null) return;
     const frame = parseIBeacon(device.manufacturerData);
     const eddy = frame ? null : parseEddystoneUid(device.serviceData as Record<string, string> | null);
-    // 식별자 우선순위 (2026-08-05 MAC 랜덤화 대응):
-    //  ① iBeacon: UUID|major|minor  ② Eddystone UID: eddy:namespace:instance
-    //  ③ 같은 MAC에서 ①/②를 본 적 있으면 그 고정 식별자로 귀속(패킷 병합)
-    //  ④ MAC 폴백 — 랜덤 주소는 순환하므로 QR 재연결로 보정
-    let uuid: string;
-    if (frame) {
-      uuid = `${frame.uuid}|${frame.major}|${frame.minor}`.toLowerCase();
-      this.macToStable.set(device.id, uuid);
-    } else if (eddy) {
-      uuid = `eddy:${eddy.namespace}:${eddy.instance}`.toLowerCase();
-      this.macToStable.set(device.id, uuid);
-    } else {
-      uuid = (this.macToStable.get(device.id) ?? device.id).toLowerCase();
-    }
+    // 식별자 = 디바이스 MAC (2026-08-05 확정 — HolyIOT 실물 확인):
+    // HolyIOT은 MAC이 고정이고 QR 인쇄값이 곧 MAC이라, MAC이 가장 단순·확실한 식별자.
+    // 매칭은 normalizeUuid(콜론 무시)로 — QR 등록값 45C66AF31951 == 전파 45:c6:6a:f3:19:51.
+    // iBeacon/Eddystone 프레임은 measuredPower(거리 보정)·major/minor 표시에만 사용.
+    const uuid = device.id.toLowerCase();
 
     const filter = this.opts.filterUuids?.();
     if (filter && filter.length > 0 && !filter.includes(uuid)) return;
