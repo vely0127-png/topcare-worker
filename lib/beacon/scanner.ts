@@ -186,7 +186,16 @@ export class BleBeaconScanner {
     );
   }
 
+  private scanCount = 0;
+
   private handleDevice(device: Device): void {
+    // [진단] Holy 비콘(45:C6:6A:…)은 모든 콜백 로깅 + 500콜백마다 수신량 요약
+    if (device.id.toLowerCase().startsWith('45:c6')) {
+      console.log(`[BEACON_RAW45] ${device.id} rssi=${device.rssi} mfg=${device.manufacturerData ?? '-'}`);
+    }
+    if (++this.scanCount % 500 === 0) {
+      console.log(`[BEACON_CNT] callbacks=${this.scanCount} uniqueIds=${this.loggedIds.size}`);
+    }
     if (device.rssi == null) return;
     const frame = parseIBeacon(device.manufacturerData);
     const eddy = frame ? null : parseEddystoneUid(device.serviceData as Record<string, string> | null);
