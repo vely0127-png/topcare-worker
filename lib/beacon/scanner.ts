@@ -126,6 +126,8 @@ export class BleBeaconScanner {
     }
     if (!this.manager) {
       this.manager = new plx.BleManager();
+      // [진단] 네이티브 스캔 계층 로그 — logcat 태그 RxBle로 기기별 수신 확인 (2026-08-05)
+      this.manager.setLogLevel(plx.LogLevel.Verbose);
       // 어댑터 상태 추적(현재 상태 즉시 방출).
       this.stateSub = this.manager.onStateChange((s) => this.handleAdapterState(plx, s), true);
     }
