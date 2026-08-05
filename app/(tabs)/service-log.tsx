@@ -23,6 +23,7 @@ import { useResidents } from '@/lib/hooks/useResidents';
 import type { ServiceProvision, ProvisionStatus } from '@/lib/hooks/useServiceProvisions';
 import type { PendingSelection } from '@/lib/hooks/useBeaconServiceLog';
 import { SERVICE_TYPES, serviceTypeLabel } from '@/lib/care/service-rules';
+import { beaconRegistry } from '@/lib/beacon';
 
 // ── 포맷 헬퍼 ────────────────────────────────────────────────
 function fmtTime(iso: string | null): string {
@@ -144,8 +145,17 @@ function SelectionModal({
   onResolve: (residentId: string, serviceType: string) => void;
   onDismiss: () => void;
 }) {
-  const [selectedResident, setSelectedResident] = useState('');
+  // 현재 비콘의 담당 입소자(웹 등록부) — 하이라이트·선선택·앞정렬 (2026-08-05)
+  const binding = beaconRegistry.get(pending.event.uuid);
+  const assignedIds = new Set((binding?.residents ?? []).map((r) => r.id));
+  const [selectedResident, setSelectedResident] = useState(
+    binding?.residents?.length === 1 ? binding.residents[0].id : '',
+  );
   const [selectedService, setSelectedService] = useState('');
+  const orderedResidents = [
+    ...residents.filter((r) => assignedIds.has(r.id)),
+    ...residents.filter((r) => !assignedIds.has(r.id)),
+  ];
 
   // P0-4(2026-07-27): serviceType은 웹 코드값 정본 — 한글 라벨을 값으로 보내면
   // 관찰·식사·투약 자동 연동과 개인계획 경고(C5)가 전부 미발동된다.
@@ -158,22 +168,28 @@ function SelectionModal({
           <View style={styles.modalHandle} />
           <Text style={styles.modalTitle}>서비스 기록 확인 필요</Text>
           <Text style={styles.modalDesc}>
-            비콘 진입이 감지되었습니다. 어느 어르신께 어떤 서비스를 제공하시나요?
+            {binding?.roomLabel
+              ? `${binding.roomLabel} 비콘 진입이 감지되었습니다. 어떤 서비스를 제공하시나요?`
+              : '비콘 진입이 감지되었습니다. 어느 어르신께 어떤 서비스를 제공하시나요?'}
           </Text>
           <Text style={styles.modalLabel}>입주자 선택</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.hScroll}>
             <View style={styles.chipRow}>
-              {residents.map((r) => (
-                <TouchableOpacity
-                  key={r.id}
-                  style={[styles.chip, selectedResident === r.id && styles.chipOn]}
-                  onPress={() => setSelectedResident(r.id)}
-                >
-                  <Text style={[styles.chipText, selectedResident === r.id && styles.chipTextOn]}>
-                    {r.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {orderedResidents.map((r) => {
+                const isAssigned = assignedIds.has(r.id);
+                const isOn = selectedResident === r.id;
+                return (
+                  <TouchableOpacity
+                    key={r.id}
+                    style={[styles.chip, isAssigned && styles.chipAssigned, isOn && styles.chipOn]}
+                    onPress={() => setSelectedResident(r.id)}
+                  >
+                    <Text style={[styles.chipText, isAssigned && styles.chipTextAssigned, isOn && styles.chipTextOn]}>
+                      {isAssigned ? '⦿ ' : ''}{r.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </ScrollView>
 
@@ -522,7 +538,9 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#fff',
   },
   chipOn: { backgroundColor: '#1A5276', borderColor: '#1A5276' },
+  chipAssigned: { borderColor: '#1D4ED8', borderWidth: 2, backgroundColor: '#EFF6FF' },
   chipText: { fontSize: 13, color: '#374151' },
+  chipTextAssigned: { color: '#1D4ED8', fontWeight: '800' },
   chipTextOn: { color: '#fff', fontWeight: '600' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
   modalCancel: {
