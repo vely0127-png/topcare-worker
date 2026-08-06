@@ -1,20 +1,21 @@
 /**
  * useBeaconServiceLog — BLE 근접 + 서비스 자동기록 통합 훅 (S4c).
  *
- * useBeaconProximity(S4a) 위에:
- *   1) 오늘 서비스 시간표 조회 (S4b GET /api/care/service-schedules)
- *   2) enter → draft ServiceProvision 생성 (S4b POST)
- *   3) exit  → endAt PATCH (S4b PATCH /[id])
- *   4) 오늘 provision 목록 (초안/확정) 반환
- *   5) 수동 선택 필요 이벤트 큐 반환
+ * useBeaconProximity(전역 스캐너) 위에:
+ *   1) 오늘 서비스 시간표 조회 (GET /api/care/service-schedules)
+ *   2) enter/exit → POST /api/presence/events (체류 원장 + 서버가 초안 생성·마감)
+ *   3) 오늘 provision 목록 (초안/확정) 반환
+ *   4) 수동 선택 필요 이벤트 큐 반환
  *
- * 완전 자동 확정 없음 — 생성은 항상 draft.
+ * 2026-08-06 일원화: 앱은 초안을 직접 만들지 않는다. 사실만 보내고 서버가 쓴다.
+ * 완전 자동 확정 없음 — 서버가 만드는 것도 항상 draft.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { useBeaconProximity, type BeaconAttendanceState } from './useBeaconProximity';
 import { useServiceSchedules } from './useServiceSchedules';
-import { useServiceProvisions, useCreateServiceProvision, usePatchServiceProvision } from './useServiceProvisions';
+import { useServiceProvisions } from './useServiceProvisions';
 import { ServiceRecorder, type OpenService } from '../beacon/service-recorder';
 import { useAuthStore } from '../auth/auth-store';
 import type { BeaconStatus, ProximityEvent } from '../beacon/types';
@@ -48,6 +49,8 @@ export interface UseBeaconServiceLogResult {
   /** 수동 선택이 필요한 이벤트 큐. */
   pendingSelections: PendingSelection[];
   serviceError: string | null;
+  /** 서버가 돌려준 처리 결과 문구(정합 수행 등). 없으면 null. */
+  serverMessage: string | null;
 
   // 오늘 요약 통계
   todaySummary: {
@@ -90,41 +93,37 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
   });
   const todayProvisions = provisionsData?.items ?? [];
 
-  // mutations
-  const { mutateAsync: createProvision } = useCreateServiceProvision();
-  const { mutateAsync: patchProvision } = usePatchServiceProvision();
-
-  // [Bug2 fix] 최신 mutation 함수를 ref로 유지 — stale closure 방지
-  const createProvisionRef = useRef(createProvision);
-  const patchProvisionRef = useRef(patchProvision);
-  createProvisionRef.current = createProvision;
-  patchProvisionRef.current = patchProvision;
-
   // 서비스 기록 오류
   const [serviceError, setServiceError] = useState<string | null>(null);
+  // 서버 처리 결과 안내(정합 결과 등)
+  const [serverMessage, setServerMessage] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   // 수동 선택 큐
   const [pendingSelections, setPendingSelections] = useState<PendingSelection[]>([]);
   const pendingEventRef = useRef<Map<string, ProximityEvent>>(new Map()); // selId → event
 
-  // ServiceRecorder (1회 생성) — opts는 ref를 통해 항상 최신값 사용
+  // ServiceRecorder (1회 생성).
+  // 2026-08-06: 초안 생성은 서버가 단독 수행 — 여기서는 mutation 을 주입하지 않는다.
   const recorderRef = useRef<ServiceRecorder | null>(null);
   if (!recorderRef.current) {
     recorderRef.current = new ServiceRecorder({
-      createProvision: (vars) => createProvisionRef.current(vars),
-      patchProvision: async (id, endAt) => {
-        await patchProvisionRef.current({ id, endAt });
-      },
       onNeedSelection: (event) => {
         const selId = `sel-${++selCounter}`;
         pendingEventRef.current.set(selId, event);
         setPendingSelections((prev) => [...prev, { event, id: selId }]);
       },
-      onDraftCreated: (_provision, _auto) => {
+      onDraftCreated: () => {
         setServiceError(null);
+        void qc.invalidateQueries({ queryKey: ['service-provisions'] });
       },
+      onServiceEnded: () => {
+        void qc.invalidateQueries({ queryKey: ['service-provisions'] });
+        void qc.invalidateQueries({ queryKey: ['alerts'] });
+      },
+      onServerMessage: (msg) => setServerMessage(msg),
       onError: (phase, err) => {
-        setServiceError(`서비스 기록 오류(${phase}): ${err.message}`);
+        setServiceError(`체류 기록 오류(${phase}): ${err.message}`);
       },
     });
   }
@@ -208,6 +207,7 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
     provisionsLoading,
     pendingSelections,
     serviceError,
+    serverMessage,
     todaySummary,
     resolveSelection,
     dismissSelection,
