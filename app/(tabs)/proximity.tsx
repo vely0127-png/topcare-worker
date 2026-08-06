@@ -66,6 +66,7 @@ export default function ProximityScreen() {
     getStatuses,
     strongest,
     currentBinding,
+    manuallyPaused,
   } = useBeaconProximity();
 
   const status = useMemo(() => STATE_LABEL[scannerState], [scannerState]);
@@ -255,7 +256,8 @@ export default function ProximityScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
-        {/* 상태 + 스캔 토글 */}
+        {/* 상태 + 스캔 토글 — 스캔은 앱을 켜면 자동으로 돈다(2026-08-06).
+            여기 버튼은 잠시 끄는 용도이고, 끈 상태는 화면에 정직하게 표시한다. */}
         <View style={styles.headerCard}>
           <View style={styles.statusRow}>
             <View style={[styles.dot, { backgroundColor: status.color }]} />
@@ -271,9 +273,19 @@ export default function ProximityScreen() {
               size={18}
               color="#fff"
             />
-            <Text style={styles.scanBtnText}>{scanning ? '스캔 중지' : '스캔 시작'}</Text>
+            <Text style={styles.scanBtnText}>{scanning ? '잠시 끄기' : '스캔 켜기'}</Text>
           </TouchableOpacity>
         </View>
+
+        {manuallyPaused && (
+          <View style={styles.pausedCard}>
+            <MaterialCommunityIcons name="bluetooth-off" size={22} color="#B45309" />
+            <Text style={styles.pausedText}>
+              스캔을 꺼두셨습니다. 현재 위치·자동기록·체류시간이 남지 않습니다.
+              평소에는 켜두세요 — 앱을 켜면 저절로 돕니다.
+            </Text>
+          </View>
+        )}
 
         {beaconPerm.data?.canRegister && (
           <TouchableOpacity
@@ -734,10 +746,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minHeight: 56, // 터치 최소 — 50~70대 기준(lib/theme TOUCH.min)
     borderRadius: 8,
   },
+  pausedCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    backgroundColor: '#FEF3C7', borderRadius: 10, padding: 14,
+  },
+  pausedText: { flex: 1, color: '#92400E', fontSize: 16, fontWeight: '600', lineHeight: 23 },
   scanBtnStart: { backgroundColor: '#1A5276' },
   scanBtnStop: { backgroundColor: '#DC2626' },
   scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },

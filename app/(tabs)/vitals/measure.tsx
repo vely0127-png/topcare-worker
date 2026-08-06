@@ -19,7 +19,7 @@
  *   - 서버가 범위 밖 값을 조용히 버리므로 저장 전에 앱에서 막고 사유를 보여준다.
  *   - 이상치는 "확인 권장"까지만. 진단 문구를 쓰지 않는다.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, Alert as RNAlert,
@@ -32,6 +32,7 @@ import {
   useVitals, useVitalsSave, vitalRangeError, alertReasons, cautionNotes,
   type VitalItem, type VitalField, type VitalNumbers,
 } from '@/lib/hooks/useVitals';
+import { useBeaconProximity } from '@/lib/hooks/useBeaconProximity';
 import { getKSTToday, toKSTDate, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -87,6 +88,45 @@ export default function VitalMeasureScreen() {
     setSaveError(null);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
+
+  // ── 비콘 연동 (2026-08-06 대표 지시: "바이탈 측정할 때도 스캔") ──
+  // 침대마다 비콘이 있으므로 어르신 앞에 서면 그분 화면이 떠 있어야 한다.
+  // 스캔은 앱 전역에서 이미 돌고 있다(BeaconProvider) — 여기서는 결과만 읽는다.
+  const { scanning: beaconScanning, currentBinding } = useBeaconProximity();
+
+  // 담당 입소자가 **정확히 1명**으로 확정된 비콘만 신뢰한다.
+  // 호실 폴백(여러 명)이면 누구 앞인지 알 수 없으므로 아무 것도 하지 않는다.
+  const beaconResident = useMemo(() => {
+    const rs = currentBinding?.residents ?? [];
+    return rs.length === 1 ? rs[0] : null;
+  }, [currentBinding]);
+
+  const beaconIndex = useMemo(
+    () => (beaconResident ? residents.findIndex((r) => r.residentId === beaconResident.id) : -1),
+    [beaconResident, residents],
+  );
+
+  // 자동 이동은 **입력 중이 아닐 때만.** 값을 적는 중에 화면이 바뀌면 그게 더 큰 사고다.
+  // 입력 중이면 대신 배너로 알리고 이동은 사람이 누른다.
+  const autoJumpedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!beaconResident) {
+      autoJumpedForRef.current = null; // 자리를 벗어나면 초기화 — 다시 오면 또 이동
+      return;
+    }
+    if (beaconIndex < 0 || beaconIndex === index) return;
+    if (hasAnyValue) return;
+    if (autoJumpedForRef.current === beaconResident.id) return; // 사람이 벗어난 뒤 다시 끌어오지 않음
+    autoJumpedForRef.current = beaconResident.id;
+    goTo(beaconIndex);
+    // goTo는 순수 상태 변경이라 의존성에 넣지 않는다(매 렌더 새 함수).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beaconResident, beaconIndex, index, hasAnyValue]);
+
+  /** 지금 보고 있는 분이 비콘이 가리키는 분인가 */
+  const atThisBed = beaconIndex >= 0 && beaconIndex === index;
+  /** 다른 분 앞에 서 있는데 화면은 딴 사람인 상태 */
+  const beaconElsewhere = beaconIndex >= 0 && beaconIndex !== index;
 
   const finish = () => {
     RNAlert.alert(
@@ -197,6 +237,13 @@ export default function VitalMeasureScreen() {
         <View style={[styles.trackFill, { width: `${(doneCount / residents.length) * 100}%` }]} />
       </View>
 
+      {/* 스캔이 꺼져 있으면 왜 자리 인식이 안 되는지 정직하게 알린다 */}
+      {!beaconScanning ? (
+        <Text style={styles.scanOffNote}>
+          비콘 스캔이 꺼져 있어 자리 자동 인식이 안 됩니다 — 명단 순서로 진행합니다.
+        </Text>
+      ) : null}
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -206,8 +253,34 @@ export default function VitalMeasureScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
+          {/* 비콘이 다른 분을 가리키는 중 — 입력 중이라 자동으로 옮기지 않았다 */}
+          {beaconElsewhere && beaconResident ? (
+            <TouchableOpacity
+              style={styles.beaconJump}
+              onPress={() => {
+                autoJumpedForRef.current = beaconResident.id;
+                goTo(beaconIndex);
+              }}
+            >
+              <MaterialCommunityIcons name="bluetooth-connect" size={26} color={COLOR.primary} />
+              <View style={styles.flex}>
+                <Text style={styles.beaconJumpTitle}>지금 계신 자리: {beaconResident.name}님</Text>
+                <Text style={styles.beaconJumpSub}>
+                  {currentBinding?.roomLabel ?? ''} · 눌러서 이분 측정하기
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={30} color={COLOR.primary} />
+            </TouchableOpacity>
+          ) : null}
+
           {/* 이 화면의 주인공 — 지금 이 한 분 */}
-          <View style={styles.personCard}>
+          <View style={[styles.personCard, atThisBed && styles.personCardHere]}>
+            {atThisBed ? (
+              <View style={styles.hereChip}>
+                <MaterialCommunityIcons name="bluetooth-connect" size={18} color={COLOR.onPrimary} />
+                <Text style={styles.hereChipText}>지금 이 자리</Text>
+              </View>
+            ) : null}
             <Text style={styles.personName}>{current.name}</Text>
             <Text style={styles.personRoom}>
               {current.room}
@@ -379,6 +452,25 @@ const styles = StyleSheet.create({
     backgroundColor: COLOR.surface, borderRadius: RADIUS.lg,
     padding: SPACE.xl, alignItems: 'center', gap: SPACE.xs,
     borderWidth: 1, borderColor: COLOR.border,
+  },
+  personCardHere: { borderColor: COLOR.primary, borderWidth: 2 },
+  hereChip: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.xs,
+    backgroundColor: COLOR.primary, borderRadius: RADIUS.sm,
+    paddingHorizontal: SPACE.md, paddingVertical: SPACE.xs, marginBottom: SPACE.xs,
+  },
+  hereChipText: { color: COLOR.onPrimary, fontSize: FONT.caption, fontWeight: '700' },
+  beaconJump: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.md,
+    backgroundColor: '#EFF6FF', borderRadius: RADIUS.md,
+    borderWidth: 2, borderColor: COLOR.primary,
+    padding: SPACE.lg, minHeight: TOUCH.large,
+  },
+  beaconJumpTitle: { fontSize: FONT.body, fontWeight: '700', color: COLOR.primary },
+  beaconJumpSub: { fontSize: FONT.caption, color: COLOR.textMuted, marginTop: 2 },
+  scanOffNote: {
+    fontSize: FONT.caption, color: COLOR.textMuted,
+    paddingHorizontal: SPACE.lg, paddingTop: SPACE.sm, backgroundColor: COLOR.surface,
   },
   personName: { fontSize: FONT.display, fontWeight: '700', color: COLOR.text },
   personRoom: { fontSize: FONT.heading, color: COLOR.textSub },
