@@ -1,22 +1,29 @@
 /**
- * 역할별 홈 공용 스캐폴드 (스켈레톤).
+ * 역할별 홈 — 작업 하나를 고르는 큰 버튼 메뉴.
  *
- * S1 기반층 단계 — 실데이터는 채우지 않는다(S2 담당).
- * 인사말 + 역할 + 역할별 주요 기능 진입 카드 + 로그아웃만 제공.
+ * 2026-08-06 요양원 PoC 피드백 반영: 사용자층 50~70대 → 1페이지 1작업.
+ * 이전 2열 그리드(라벨 15pt, 높이 92)를 1열 큰 버튼(라벨 22pt, 높이 84+)으로 바꿨다.
+ * 홈은 "무엇을 할지 고르는 곳"만 담당하고, 고른 작업은 전체화면으로 열린다.
  */
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useSession, useRole } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/auth/auth-store';
+import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 export interface QuickAction {
   key: string;
   label: string;
-  /** 진입 경로. 아직 미구현 화면은 생략 가능(누르면 비활성 안내). */
+  /** 진입 경로. 없으면 홈에 아예 표시하지 않는다(죽은 카드 금지). */
   href?: string;
   hint?: string;
+  /** MaterialCommunityIcons 이름 */
+  icon?: keyof typeof MaterialCommunityIcons.glyphMap;
+  /** 강조 버튼(그 역할의 주 업무) */
+  primary?: boolean;
 }
 
 export function RoleHome({
@@ -31,16 +38,19 @@ export function RoleHome({
   const role = useRole();
   const logout = useAuthStore((s) => s.logout);
 
+  // href 없는 항목은 표시하지 않는다 — 눌러도 아무 일 없는 버튼은
+  // 현장에서 "고장난 앱"으로 읽힌다(가짜 성공 금지 원칙과 같은 이유).
+  const available = actions.filter((a) => !!a.href);
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.headerRow}>
           <View style={styles.flex}>
-            <Text style={styles.greeting}>
-              {session?.user.name ?? '사용자'}님
-            </Text>
+            <Text style={styles.greeting}>{session?.user.name ?? '사용자'}님</Text>
             <Text style={styles.role}>
-              {role?.label ?? '-'} · {session?.orgName ?? ''}
+              {role?.label ?? '-'}
+              {session?.orgName ? ` · ${session.orgName}` : ''}
             </Text>
           </View>
           <TouchableOpacity style={styles.logoutBtn} onPress={() => void logout()}>
@@ -50,52 +60,87 @@ export function RoleHome({
 
         <Text style={styles.sectionTitle}>{title}</Text>
 
-        <View style={styles.grid}>
-          {actions.map((a) => (
+        <View style={styles.list}>
+          {available.map((a) => (
             <TouchableOpacity
               key={a.key}
-              style={[styles.card, !a.href && styles.cardDisabled]}
-              disabled={!a.href}
-              onPress={() => a.href && router.push(a.href)}
+              style={[styles.button, a.primary && styles.buttonPrimary]}
+              onPress={() => router.push(a.href as never)}
+              accessibilityRole="button"
+              accessibilityLabel={a.label}
             >
-              <Text style={styles.cardLabel}>{a.label}</Text>
-              {a.hint ? <Text style={styles.cardHint}>{a.hint}</Text> : null}
-              {!a.href ? <Text style={styles.soon}>준비 중 (S2)</Text> : null}
+              {a.icon ? (
+                <MaterialCommunityIcons
+                  name={a.icon}
+                  size={36}
+                  color={a.primary ? COLOR.onPrimary : COLOR.primary}
+                  style={styles.icon}
+                />
+              ) : null}
+              <View style={styles.flex}>
+                <Text style={[styles.label, a.primary && styles.labelPrimary]}>{a.label}</Text>
+                {a.hint ? (
+                  <Text style={[styles.hint, a.primary && styles.hintPrimary]}>{a.hint}</Text>
+                ) : null}
+              </View>
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={32}
+                color={a.primary ? COLOR.onPrimary : COLOR.textFaint}
+              />
             </TouchableOpacity>
           ))}
         </View>
 
-        <Text style={styles.note}>
-          기반층(S1) 스켈레톤입니다. 각 기능 화면의 실데이터 연동은 S2에서 진행됩니다.
-        </Text>
+        {available.length < actions.length ? (
+          <Text style={styles.note}>
+            그 외 업무는 아직 앱에 없습니다. 웹(관리자 화면)에서 이용하세요.
+          </Text>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6' },
-  content: { padding: 16, gap: 16 },
+  container: { flex: 1, backgroundColor: COLOR.bg },
+  content: { padding: SPACE.lg, gap: SPACE.lg, paddingBottom: SPACE.xxl },
   flex: { flex: 1 },
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  greeting: { fontSize: 22, fontWeight: 'bold', color: '#1A5276' },
-  role: { fontSize: 14, color: '#6B7280', marginTop: 2 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.md },
+  greeting: { fontSize: FONT.title, fontWeight: 'bold', color: COLOR.primary },
+  role: { fontSize: FONT.label, color: COLOR.textMuted, marginTop: 2 },
   logoutBtn: {
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 10, backgroundColor: '#E5E7EB',
+    paddingHorizontal: SPACE.lg,
+    minHeight: TOUCH.min,
+    justifyContent: 'center',
+    borderRadius: RADIUS.md,
+    backgroundColor: COLOR.border,
   },
-  logoutText: { color: '#374151', fontWeight: '600', fontSize: 13 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 4 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  card: {
-    width: '47%', minHeight: 92, borderRadius: 14, backgroundColor: '#fff',
-    padding: 16, justifyContent: 'center',
-    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  logoutText: { color: COLOR.textSub, fontWeight: '600', fontSize: FONT.label },
+  sectionTitle: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.text },
+  list: { gap: SPACE.md },
+  button: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.lg,
+    minHeight: TOUCH.menu,
+    borderRadius: RADIUS.lg,
+    backgroundColor: COLOR.surface,
+    paddingHorizontal: SPACE.lg,
+    paddingVertical: SPACE.lg,
+    borderWidth: 1,
+    borderColor: COLOR.border,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
   },
-  cardDisabled: { opacity: 0.55 },
-  cardLabel: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
-  cardHint: { fontSize: 12, color: '#6B7280', marginTop: 4 },
-  soon: { fontSize: 11, color: '#9CA3AF', marginTop: 8 },
-  note: { fontSize: 12, color: '#9CA3AF', marginTop: 8, lineHeight: 18 },
+  buttonPrimary: { backgroundColor: COLOR.primary, borderColor: COLOR.primary },
+  icon: { width: 36, textAlign: 'center' },
+  label: { fontSize: 22, fontWeight: '700', color: COLOR.text },
+  labelPrimary: { color: COLOR.onPrimary },
+  hint: { fontSize: FONT.label, color: COLOR.textMuted, marginTop: 2 },
+  hintPrimary: { color: 'rgba(255,255,255,0.85)' },
+  note: { fontSize: FONT.caption, color: COLOR.textFaint, lineHeight: 20 },
 });

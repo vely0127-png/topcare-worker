@@ -439,19 +439,19 @@ const styles = StyleSheet.create({
   },
   bleStatus: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   bleDot: { width: 9, height: 9, borderRadius: 5 },
-  bleStatusText: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  bleStatusText: { fontSize: 16, fontWeight: '600', color: '#111827' },
   scanBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 7,
   },
   scanBtnStart: { backgroundColor: '#1A5276' },
   scanBtnStop: { backgroundColor: '#DC2626' },
-  scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 
   warnBox: { backgroundColor: '#FEF3C7', borderRadius: 8, padding: 12 },
-  warnText: { color: '#92400E', fontSize: 12, lineHeight: 18 },
+  warnText: { color: '#92400E', fontSize: 15, lineHeight: 18 },
   errorBox: { backgroundColor: '#FEE2E2', borderRadius: 8, padding: 12 },
-  errorText: { color: '#B91C1C', fontSize: 12 },
+  errorText: { color: '#B91C1C', fontSize: 15 },
 
   summaryRow: {
     flexDirection: 'row', backgroundColor: '#fff', borderRadius: 10,
@@ -459,23 +459,23 @@ const styles = StyleSheet.create({
   },
   summaryItem: { flex: 1, alignItems: 'center', gap: 4 },
   summarySep: { width: 1, backgroundColor: '#E5E7EB' },
-  summaryNum: { fontSize: 22, fontWeight: '700', color: '#1A5276' },
+  summaryNum: { fontSize: 24, fontWeight: '700', color: '#1A5276' },
   summaryNumWarn: { color: '#D97706' },
-  summaryLabel: { fontSize: 11, color: '#6B7280' },
+  summaryLabel: { fontSize: 14, color: '#6B7280' },
 
   section: { gap: 8 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  empty: { fontSize: 13, color: '#9CA3AF', paddingVertical: 12, textAlign: 'center' },
+  empty: { fontSize: 16, color: '#9CA3AF', paddingVertical: 12, textAlign: 'center' },
 
   // Alert card
   alertCard: {
     backgroundColor: '#FFF7F7', borderRadius: 8, padding: 12,
     borderWidth: 1, borderColor: '#FECACA', gap: 3,
   },
-  alertTitle: { fontSize: 13, fontWeight: '600', color: '#991B1B' },
-  alertDesc: { fontSize: 12, color: '#7F1D1D' },
-  alertMeta: { fontSize: 11, color: '#B91C1C', marginTop: 2 },
+  alertTitle: { fontSize: 16, fontWeight: '600', color: '#991B1B' },
+  alertDesc: { fontSize: 15, color: '#7F1D1D' },
+  alertMeta: { fontSize: 14, color: '#B91C1C', marginTop: 2 },
 
   // Provision card
   card: {
@@ -488,23 +488,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5,
   },
   activeDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#3B82F6' },
-  activeLabel: { fontSize: 11, fontWeight: '700', color: '#1D4ED8' },
+  activeLabel: { fontSize: 14, fontWeight: '700', color: '#1D4ED8' },
   cardHeader: { gap: 2 },
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardResident: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  cardServiceType: { fontSize: 13, color: '#6B7280' },
+  cardResident: { fontSize: 17, fontWeight: '700', color: '#111827' },
+  cardServiceType: { fontSize: 16, color: '#6B7280' },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  badgeText: { fontSize: 11, fontWeight: '700' },
+  badgeText: { fontSize: 14, fontWeight: '700' },
   cardTimeRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap',
   },
   timeBlock: { alignItems: 'center', gap: 1 },
-  timeLabel: { fontSize: 10, color: '#9CA3AF' },
-  timeValue: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  timeLabel: { fontSize: 14, color: '#9CA3AF' },
+  timeValue: { fontSize: 16, fontWeight: '600', color: '#111827' },
   durationBlock: { marginLeft: 'auto', alignItems: 'flex-end', gap: 1 },
-  durationValue: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  durationValue: { fontSize: 16, fontWeight: '600', color: '#374151' },
   sourceBlock: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  sourceText: { fontSize: 11, color: '#9CA3AF' },
+  sourceText: { fontSize: 14, color: '#9CA3AF' },
   actionRow: { flexDirection: 'row', gap: 8 },
   actionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -512,8 +512,8 @@ const styles = StyleSheet.create({
   },
   confirmBtn: { backgroundColor: '#1A5276' },
   rejectBtn: { backgroundColor: '#9CA3AF' },
-  actionBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  confirmedMeta: { fontSize: 11, color: '#6B7280' },
+  actionBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  confirmedMeta: { fontSize: 14, color: '#6B7280' },
 
   // Selection modal
   modalOverlay: {
@@ -527,9 +527,9 @@ const styles = StyleSheet.create({
     width: 36, height: 4, backgroundColor: '#D1D5DB',
     borderRadius: 2, alignSelf: 'center', marginBottom: 6,
   },
-  modalTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  modalDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18 },
-  modalLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginTop: 4 },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  modalDesc: { fontSize: 16, color: '#6B7280', lineHeight: 18 },
+  modalLabel: { fontSize: 16, fontWeight: '600', color: '#374151', marginTop: 4 },
   hScroll: { flexGrow: 0 },
   chipRow: { flexDirection: 'row', gap: 8, paddingVertical: 4 },
   chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -539,7 +539,7 @@ const styles = StyleSheet.create({
   },
   chipOn: { backgroundColor: '#1A5276', borderColor: '#1A5276' },
   chipAssigned: { borderColor: '#1D4ED8', borderWidth: 2, backgroundColor: '#EFF6FF' },
-  chipText: { fontSize: 13, color: '#374151' },
+  chipText: { fontSize: 16, color: '#374151' },
   chipTextAssigned: { color: '#1D4ED8', fontWeight: '800' },
   chipTextOn: { color: '#fff', fontWeight: '600' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
@@ -547,19 +547,19 @@ const styles = StyleSheet.create({
     flex: 1, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
     padding: 13, alignItems: 'center',
   },
-  modalCancelText: { fontSize: 14, color: '#6B7280', fontWeight: '600' },
+  modalCancelText: { fontSize: 16, color: '#6B7280', fontWeight: '600' },
   modalConfirm: {
     flex: 2, backgroundColor: '#1A5276', borderRadius: 8,
     padding: 13, alignItems: 'center',
   },
   modalConfirmDisabled: { backgroundColor: '#D1D5DB' },
-  modalConfirmText: { fontSize: 14, color: '#fff', fontWeight: '700' },
+  modalConfirmText: { fontSize: 16, color: '#fff', fontWeight: '700' },
 
   guideBox: {
     flexDirection: 'row', gap: 6, alignItems: 'flex-start',
     backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12,
   },
-  guideText: { flex: 1, fontSize: 11, color: '#6B7280', lineHeight: 16 },
+  guideText: { flex: 1, fontSize: 14, color: '#6B7280', lineHeight: 16 },
 
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useResidents } from '../../../lib/hooks/useResidents';
 import { useCareRecords, useCareRecordCreate } from '../../../lib/hooks/useCareRecords';
 import { useSession } from '../../../lib/hooks/useAuth';
+import { getKSTToday } from '../../../lib/utils/date';
 
 const OBSERVATION_CATEGORIES = [
   { id: 'general',   label: '전반 상태', emoji: '👀' },
@@ -70,7 +71,8 @@ export default function ObservationScreen() {
       {
         residentId: selectedResident,
         recordType: 'observation',
-        recordDate: today.toISOString().slice(0, 10),
+        // KST 날짜 — UTC 슬라이스면 새벽 0~9시 기록이 전날로 밀린다(야간 근무 시간대)
+        recordDate: getKSTToday(),
         recordTime: today.toISOString(),
         content: `[${catLabel}] ${noteText}`,
         staffId: session?.user.staffId ?? null,
@@ -89,9 +91,12 @@ export default function ObservationScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
+      {/* 제목은 네비게이션 헤더가 표시 (2026-08-06 탭바 제거) */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>관찰 기록</Text>
-        <TouchableOpacity onPress={() => setShowHistory(!showHistory)}>
+        <TouchableOpacity
+          style={styles.historyHit}
+          onPress={() => setShowHistory(!showHistory)}
+        >
           <Text style={styles.historyBtn}>
             {showHistory ? '기록하기' : `기록 (${history.length})`}
           </Text>
@@ -208,20 +213,20 @@ export default function ObservationScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   header: {
-    backgroundColor: '#1A5276', padding: 16,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#1A5276', paddingHorizontal: 16, paddingBottom: 12,
+    flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center',
   },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  historyBtn: { color: '#93C5FD', fontSize: 14, fontWeight: '500' },
+  historyHit: { minHeight: 56, justifyContent: 'center', paddingHorizontal: 8 },
+  historyBtn: { color: '#93C5FD', fontSize: 18, fontWeight: '600' },
   content: { padding: 16, gap: 16 },
-  sectionLabel: { fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: -8 },
+  sectionLabel: { fontSize: 16, fontWeight: '700', color: '#374151', marginBottom: -8 },
   residentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   residentChip: {
     paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10,
     backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
   },
   residentChipActive: { backgroundColor: '#1A5276', borderColor: '#1A5276' },
-  residentChipText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  residentChipText: { fontSize: 16, color: '#374151', fontWeight: '500' },
   residentChipTextActive: { color: '#fff' },
   catScroll: { flexGrow: 0 },
   catChip: {
@@ -229,27 +234,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8, minWidth: 64,
   },
   catChipActive: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6' },
-  catEmoji: { fontSize: 20 },
-  catLabel: { fontSize: 11, color: '#6B7280', marginTop: 4 },
+  catEmoji: { fontSize: 22 },
+  catLabel: { fontSize: 14, color: '#6B7280', marginTop: 4 },
   catLabelActive: { color: '#2563EB', fontWeight: '600' },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   quickChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#EFF6FF' },
-  quickText: { fontSize: 13, color: '#2563EB' },
+  quickText: { fontSize: 16, color: '#2563EB' },
   textInput: {
     backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB',
-    padding: 14, fontSize: 14, minHeight: 100, textAlignVertical: 'top',
+    padding: 14, fontSize: 16, minHeight: 100, textAlignVertical: 'top',
   },
   saveBtn: { backgroundColor: '#16A34A', borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   saveBtnDisabled: { backgroundColor: '#6B7280' },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  emptyText: { textAlign: 'center', color: '#9CA3AF', marginTop: 40, fontSize: 15 },
+  saveBtnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  emptyText: { textAlign: 'center', color: '#9CA3AF', marginTop: 40, fontSize: 17 },
   entryCard: {
     backgroundColor: '#fff', borderRadius: 10, padding: 14,
     borderWidth: 1, borderColor: '#E5E7EB',
   },
   entryTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  entryName: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  entryTime: { fontSize: 12, color: '#9CA3AF' },
-  entryCat: { fontSize: 12, color: '#6B7280', marginBottom: 4 },
-  entryContent: { fontSize: 14, color: '#374151', lineHeight: 20 },
+  entryName: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  entryTime: { fontSize: 15, color: '#9CA3AF' },
+  entryCat: { fontSize: 15, color: '#6B7280', marginBottom: 4 },
+  entryContent: { fontSize: 16, color: '#374151', lineHeight: 20 },
 });

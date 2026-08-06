@@ -19,9 +19,9 @@ import { useApiQuery } from './useApi';
 import { PERSONAL_TYPES, inferTypeFromActivity } from '../care/service-rules';
 
 // ── KST 헬퍼 ──
-export function kstToday(): string {
-  return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
-}
+// 정본은 lib/utils/date. 여기서는 기존 사용처 호환을 위해 재수출만 한다(이원화 금지).
+import { getKSTToday } from '../utils/date';
+export const kstToday = getKSTToday;
 export function kstHHMM(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);

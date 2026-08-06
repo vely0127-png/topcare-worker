@@ -113,9 +113,6 @@ export default function TodosScreen() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['bottom']}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>오늘의 업무</Text>
-        </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#1A5276" />
           <Text style={styles.loadingText}>업무 목록 로딩 중...</Text>
@@ -126,9 +123,8 @@ export default function TodosScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      {/* 상단 진행률 */}
+      {/* 상단 진행률 (제목은 네비게이션 헤더가 표시 — 2026-08-06 탭바 제거) */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>오늘의 업무</Text>
         <View style={styles.progressRow}>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${rate}%` as `${number}%` }]} />
@@ -276,27 +272,27 @@ export default function TodosScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   header: { backgroundColor: '#1A5276', padding: 16, paddingBottom: 20 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  headerTitle: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
   progressRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 },
   progressBar: { flex: 1, height: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4 },
   progressFill: { height: 8, backgroundColor: '#34D399', borderRadius: 4 },
-  progressText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  progressText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   errorBanner: {
     backgroundColor: '#FEE2E2', padding: 12, flexDirection: 'row',
     justifyContent: 'space-between', alignItems: 'center',
   },
-  errorText: { fontSize: 13, color: '#DC2626', flex: 1 },
-  retryText: { fontSize: 13, color: '#DC2626', fontWeight: '700', marginLeft: 8 },
+  errorText: { fontSize: 16, color: '#DC2626', flex: 1 },
+  retryText: { fontSize: 16, color: '#DC2626', fontWeight: '700', marginLeft: 8 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  loadingText: { color: '#6B7280', marginTop: 12, fontSize: 14 },
+  loadingText: { color: '#6B7280', marginTop: 12, fontSize: 16 },
   filterRow: { flexDirection: 'row', padding: 12, gap: 8 },
   filterBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6' },
   filterActive: { backgroundColor: '#1A5276' },
-  filterText: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
+  filterText: { fontSize: 16, color: '#6B7280', fontWeight: '500' },
   filterTextActive: { color: '#fff' },
   list: { padding: 12, gap: 8 },
   emptyContainer: { alignItems: 'center', padding: 32 },
-  emptyText: { color: '#9CA3AF', fontSize: 15 },
+  emptyText: { color: '#9CA3AF', fontSize: 17 },
   todoCard: {
     flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12,
     padding: 14, gap: 12, borderWidth: 1, borderColor: '#E5E7EB',
@@ -308,47 +304,47 @@ const styles = StyleSheet.create({
   },
   checkDone: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
   checkProgress: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  checkMark: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  checkMark: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B82F6' },
   todoContent: { flex: 1 },
   tagRow: { flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 4 },
   catTag: {
-    fontSize: 10, backgroundColor: '#F3F4F6', paddingHorizontal: 6,
+    fontSize: 14, backgroundColor: '#F3F4F6', paddingHorizontal: 6,
     paddingVertical: 2, borderRadius: 4, color: '#374151',
   },
   managerTag: {
-    fontSize: 10, backgroundColor: '#FFF7ED', paddingHorizontal: 6,
+    fontSize: 14, backgroundColor: '#FFF7ED', paddingHorizontal: 6,
     paddingVertical: 2, borderRadius: 4, color: '#C2410C',
   },
   urgentTag: {
-    fontSize: 10, backgroundColor: '#FEE2E2', paddingHorizontal: 6,
+    fontSize: 14, backgroundColor: '#FEE2E2', paddingHorizontal: 6,
     paddingVertical: 2, borderRadius: 4, color: '#DC2626', fontWeight: '700',
   },
-  todoTitle: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  todoTitle: { fontSize: 16, fontWeight: '600', color: '#111827' },
   todoTitleDone: { textDecorationLine: 'line-through', color: '#9CA3AF' },
-  todoDesc: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  todoDesc: { fontSize: 15, color: '#6B7280', marginTop: 2 },
   todoRight: { alignItems: 'flex-end', minWidth: 56 },
-  timeText: { fontSize: 12, fontWeight: '600', color: '#374151' },
-  residentText: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  timeText: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  residentText: { fontSize: 14, color: '#6B7280', marginTop: 2 },
   modalOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center',
     alignItems: 'center', padding: 24,
   },
   modal: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  modalSubtitle: { fontSize: 13, color: '#6B7280', marginTop: 4, marginBottom: 12 },
+  modalTitle: { fontSize: 19, fontWeight: '700', color: '#111827' },
+  modalSubtitle: { fontSize: 16, color: '#6B7280', marginTop: 4, marginBottom: 12 },
   modalInput: {
     borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12,
-    fontSize: 14, minHeight: 60, textAlignVertical: 'top',
+    fontSize: 16, minHeight: 60, textAlignVertical: 'top',
   },
   modalButtons: { flexDirection: 'row', gap: 8, marginTop: 16 },
   modalCancel: {
     flex: 1, paddingVertical: 12, borderRadius: 8,
     borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center',
   },
-  modalCancelText: { fontSize: 14, color: '#6B7280' },
+  modalCancelText: { fontSize: 16, color: '#6B7280' },
   modalConfirm: { flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#16A34A', alignItems: 'center' },
   modalSkipBtn: { backgroundColor: '#F59E0B' },
-  modalConfirmText: { fontSize: 14, color: '#fff', fontWeight: '600' },
+  modalConfirmText: { fontSize: 16, color: '#fff', fontWeight: '600' },
 });

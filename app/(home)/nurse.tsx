@@ -1,13 +1,15 @@
 import { RoleHome, type QuickAction } from '@/components/RoleHome';
 
-// 간호사 — 케어 기록, 투약, 바이탈 입력, AI 분석
+// 간호사 — 바이탈 라운드, 케어 기록, 관찰 일지
+// 2026-08-06: '바이탈 입력'이라 써두고 실제로는 조회 화면으로 보내던 오표기를 수정.
+//   측정(입력) = /(tabs)/vitals/measure, 현황(조회) = /(tabs)/vitals
 const ACTIONS: QuickAction[] = [
-  { key: 'care-log', label: '케어 기록', href: '/(tabs)/care-log', hint: '서비스·관찰 일지' },
-  { key: 'vitals', label: '바이탈 입력', href: '/(tabs)/vitals', hint: '혈압·맥박·체온' },
-  { key: 'health-log', label: '건강 기록', href: '/(tabs)/health-log', hint: '식사·체중·점검' },
-  { key: 'medication', label: '투약 관리', hint: '투약 확인·기록' },
-  { key: 'observation', label: '관찰 일지', href: '/(tabs)/observation' },
-  { key: 'alerts', label: '알림센터', href: '/(tabs)/alerts' },
+  { key: 'vitals-measure', label: '바이탈 측정', href: '/(tabs)/vitals/measure', hint: '체온·산소·혈압·맥박 (한 분씩)', icon: 'thermometer', primary: true },
+  { key: 'vitals', label: '바이탈 현황', href: '/(tabs)/vitals', hint: '오늘 측정값·이상 확인', icon: 'heart-pulse' },
+  { key: 'care-log', label: '케어 기록', href: '/(tabs)/care-log', hint: '서비스·관찰 일지', icon: 'clipboard-edit' },
+  { key: 'health-log', label: '건강 기록', href: '/(tabs)/health-log', hint: '식사 섭취', icon: 'food-apple' },
+  { key: 'observation', label: '관찰 일지', href: '/(tabs)/observation', icon: 'eye-check' },
+  { key: 'alerts', label: '알림', href: '/(tabs)/alerts', icon: 'bell' },
 ];
 
 export default function NurseHome() {

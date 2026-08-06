@@ -186,14 +186,14 @@ const styles = StyleSheet.create({
   },
   headerLabel: {
     color: '#FCA5A5',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: 2,
     textTransform: 'uppercase',
   },
   headerTime: {
     color: '#FCA5A5',
-    fontSize: 14,
+    fontSize: 16,
   },
   card: {
     backgroundColor: '#fff',
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   description: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#6B7280',
     textAlign: 'center',
     marginTop: 2,
@@ -227,13 +227,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   infoLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#9CA3AF',
     fontWeight: '600',
     minWidth: 36,
   },
   infoValue: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#111827',
     fontWeight: '700',
   },
@@ -250,12 +250,12 @@ const styles = StyleSheet.create({
   ackButtonText: {
     color: '#DC2626',
     fontWeight: '800',
-    fontSize: 18,
+    fontSize: 19,
   },
   hint: {
     marginTop: 16,
     color: '#FCA5A5',
-    fontSize: 12,
+    fontSize: 15,
     textAlign: 'center',
   },
 });

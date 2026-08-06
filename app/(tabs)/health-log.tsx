@@ -13,21 +13,18 @@ import {
   INTAKE_LABEL, INTAKE_COLOR,
   type MealIntake,
 } from '../../lib/hooks/useMealIntake';
+import { getKSTToday } from '../../lib/utils/date';
 
-const TODAY = new Date().toISOString().slice(0, 10);
+// KST 기준 오늘 — UTC 슬라이스면 새벽 0~9시에 전날 표가 뜬다(야간 근무 시간대)
+const TODAY = getKSTToday();
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'] as const;
 type MealType = typeof MEAL_TYPES[number];
 const MEAL_LABELS: Record<MealType, string> = { breakfast: '조식', lunch: '중식', dinner: '석식' };
 
-const DAILY_CHECKS = [
-  '바이탈 사인 측정',
-  '식사 섭취 기록',
-  '복약 확인',
-  '이동 보조 기록',
-  '위생 케어 완료',
-  '안전 점검',
-];
+// 2026-08-06 제거: '일일 점검 체크리스트' 6줄은 로컬 useState 뿐이라 화면을 나가면
+// 사라졌다(서버 저장 없음). 체크했는데 아무 데도 안 남는 = 가짜 성공이라 삭제.
+// 같은 일을 하는 정본 화면은 '오늘 할 일'(service-provisions 로 실제 저장)이다.
 
 export default function HealthLogScreen() {
   const { data: residentsData, isLoading: loadingResidents } = useResidents({ status: '입소 중' });
@@ -39,7 +36,6 @@ export default function HealthLogScreen() {
   } = useMealIntakes({ date: TODAY });
   const { mutate: createIntake, isPending: isSaving } = useMealIntakeCreate();
 
-  const [checks, setChecks] = useState<boolean[]>(DAILY_CHECKS.map(() => false));
   // 낙관적 UI: 저장 중인 셀 추적
   const [savingCell, setSavingCell] = useState<string | null>(null);
 
@@ -69,10 +65,6 @@ export default function HealthLogScreen() {
     },
     [intakeMap, isSaving, createIntake],
   );
-
-  const toggleCheck = (i: number) => {
-    setChecks(prev => prev.map((v, idx) => (idx === i ? !v : v)));
-  };
 
   const isLoading = loadingResidents || loadingIntake;
 
@@ -128,18 +120,6 @@ export default function HealthLogScreen() {
           )}
         </View>
 
-        {/* Daily Checks */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>일일 점검 체크리스트</Text>
-          {DAILY_CHECKS.map((item, i) => (
-            <TouchableOpacity key={i} style={styles.checkItem} onPress={() => toggleCheck(i)}>
-              <View style={[styles.checkbox, checks[i] && styles.checkboxDone]}>
-                {checks[i] && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={[styles.checkLabel, checks[i] && styles.checkLabelDone]}>{item}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -179,34 +159,23 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   content: { padding: 16, gap: 24 },
   section: { gap: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
   mealTable: {
     backgroundColor: '#fff', borderRadius: 10,
     borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden',
   },
   mealHeader: { flexDirection: 'row', backgroundColor: '#F3F4F6', padding: 10 },
   mealRow: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  mealCell: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 40 },
+  // 터치 타깃 — 50~70대 기준 최소 56 (2026-08-06 PoC)
+  mealCell: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 56 },
   nameCell: { flex: 2, alignItems: 'flex-start' },
-  headerText: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
-  residentName: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  roomText: { fontSize: 11, color: '#9CA3AF' },
-  intakeText: { fontSize: 13, fontWeight: '700' },
+  headerText: { fontSize: 15, fontWeight: '700', color: '#6B7280' },
+  residentName: { fontSize: 16, fontWeight: '600', color: '#111827' },
+  roomText: { fontSize: 14, color: '#9CA3AF' },
+  intakeText: { fontSize: 16, fontWeight: '700' },
   mealCellEmpty: {
-    height: 36, borderRadius: 6,
+    height: 52, borderRadius: 6,
     backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed',
   },
-  mealCellEmptyText: { fontSize: 18, color: '#9CA3AF' },
-  checkItem: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderRadius: 8, padding: 12, gap: 12, borderWidth: 1, borderColor: '#E5E7EB', minHeight: 50,
-  },
-  checkbox: {
-    width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#D1D5DB',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  checkboxDone: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
-  checkmark: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  checkLabel: { fontSize: 14, color: '#374151', flex: 1 },
-  checkLabelDone: { color: '#9CA3AF', textDecorationLine: 'line-through' },
+  mealCellEmptyText: { fontSize: 19, color: '#9CA3AF' },
 });

@@ -101,8 +101,8 @@ const styles = StyleSheet.create({
     top: '45%',
     alignSelf: 'center',
     color: '#94a3b8',
-    fontSize: 15,
+    fontSize: 17,
   },
   clearBtn: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 4 },
-  clearText: { color: '#64748b', fontSize: 13 },
+  clearText: { color: '#64748b', fontSize: 16 },
 });

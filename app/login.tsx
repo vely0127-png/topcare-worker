@@ -130,18 +130,18 @@ const styles = StyleSheet.create({
   },
   logoText: { fontSize: 28, fontWeight: 'bold', color: '#1A5276' },
   title: { fontSize: 32, fontWeight: 'bold', color: '#fff' },
-  subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.7)', marginTop: 4 },
+  subtitle: { fontSize: 18, color: 'rgba(255,255,255,0.7)', marginTop: 4 },
   form: { gap: 12 },
   input: {
     backgroundColor: '#fff', borderRadius: 12,
-    padding: 16, fontSize: 16, minHeight: 52,
+    padding: 16, fontSize: 18, minHeight: 52,
   },
-  error: { color: '#FFD2D2', fontSize: 14, marginTop: 4, textAlign: 'center' },
+  error: { color: '#FFD2D2', fontSize: 16, marginTop: 4, textAlign: 'center' },
   loginButton: {
     backgroundColor: '#1ABC9C', borderRadius: 12,
     padding: 16, alignItems: 'center', marginTop: 8, minHeight: 52,
     justifyContent: 'center',
   },
   loginButtonDisabled: { opacity: 0.6 },
-  loginText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
+  loginText: { color: '#fff', fontWeight: 'bold', fontSize: 19 },
 });
