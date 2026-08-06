@@ -23,4 +23,6 @@ android/app/release/
 
 # misc
 *.log
+# gradle 백그라운드 빌드 로그(MCP 45초 제한 우회용 폴링 파일) — 커밋 대상 아님
+build-log.txt
 .DS_Store
