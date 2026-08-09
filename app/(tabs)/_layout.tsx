@@ -51,6 +51,7 @@ export default function TaskStackLayout() {
       <Stack.Screen name="care-log" options={{ title: '케어 기록' }} />
       <Stack.Screen name="health-log" options={{ title: '건강 기록' }} />
       <Stack.Screen name="observation/index" options={{ title: '관찰 일지' }} />
+      <Stack.Screen name="trail" options={{ title: '내 행적' }} />
       <Stack.Screen name="service-log" options={{ title: '자동 기록' }} />
       <Stack.Screen name="proximity" options={{ title: '비콘 근접' }} />
       <Stack.Screen name="alerts" options={{ title: '알림' }} />

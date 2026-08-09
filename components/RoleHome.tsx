@@ -24,6 +24,8 @@ export interface QuickAction {
   icon?: keyof typeof MaterialCommunityIcons.glyphMap;
   /** 강조 버튼(그 역할의 주 업무) */
   primary?: boolean;
+  /** 처리해야 할 건수 배지. 0이나 undefined면 표시 안 함(가짜 숫자 금지) */
+  badge?: number;
 }
 
 export function RoleHome({
@@ -83,6 +85,11 @@ export function RoleHome({
                   <Text style={[styles.hint, a.primary && styles.hintPrimary]}>{a.hint}</Text>
                 ) : null}
               </View>
+              {a.badge && a.badge > 0 ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{a.badge > 99 ? '99+' : a.badge}</Text>
+                </View>
+              ) : null}
               <MaterialCommunityIcons
                 name="chevron-right"
                 size={32}
@@ -143,4 +150,9 @@ const styles = StyleSheet.create({
   hint: { fontSize: FONT.label, color: COLOR.textMuted, marginTop: 2 },
   hintPrimary: { color: 'rgba(255,255,255,0.85)' },
   note: { fontSize: FONT.caption, color: COLOR.textFaint, lineHeight: 20 },
+  badge: {
+    minWidth: 34, height: 34, borderRadius: 17, paddingHorizontal: 8,
+    backgroundColor: COLOR.danger, alignItems: 'center', justifyContent: 'center',
+  },
+  badgeText: { color: COLOR.onPrimary, fontSize: FONT.label, fontWeight: '800' },
 });

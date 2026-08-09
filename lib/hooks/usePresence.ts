@@ -28,6 +28,11 @@ export interface PresencePostVars {
   occurredAt: string;
   distanceM?: number | null;
   source?: string;
+  /** provision-only 전용 — 어느 방문(enter 이벤트)에 초안을 붙일지 */
+  enterEventId?: string | null;
+  /** provision-only 전용 — 이미 끝난 방문이므로 종료 시각도 함께 확정.
+   *  안 주면 초안이 열린 채 남아 다음 exit 이 엉뚱하게 마감한다. */
+  endAt?: string | null;
 }
 
 export interface PresencePostResult {

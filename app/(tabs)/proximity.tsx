@@ -7,18 +7,16 @@
  * - enter/exit 이벤트 스트림(시간순)
  * - 정문 비콘 enter/exit 시 자동 출퇴근 결과
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal } from 'react-native';
+import { useMemo, useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import * as Notifications from 'expo-notifications';
 import { useBeaconProximity } from '@/lib/hooks/useBeaconProximity';
 import { useTodayTasks, kstNowHHMM, type DisplayRow } from '@/lib/hooks/useTodayTasks';
-import { useCreateServiceProvision } from '@/lib/hooks/useServiceProvisions';
-import { serviceTypeLabel, SERVICE_TYPES } from '@/lib/care/service-rules';
+import { serviceTypeLabel } from '@/lib/care/service-rules';
 import { apiFetch } from '@/lib/api/client';
 import { beaconRegistry, type ScannerState } from '@/lib/beacon';
 
@@ -27,11 +25,8 @@ const WINDOW_BEFORE_MIN = 120;
 const WINDOW_AFTER_MIN = 30;
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
-// ── 체류 프롬프트 (2026-08-05): 같은 비콘에 머물면 "무슨 서비스?" 질문 ──
-// PoC 튜닝(대표 지시): 30초 체류 시 질문, 재질문 간격 3분. 거리 임계는 현장 조절 예정.
-const DWELL_PROMPT_MS = 30_000;       // 30초 체류 시 질문
-const DWELL_COOLDOWN_MS = 3 * 60_000; // 같은 비콘 재질문 최소 간격
-const DWELL_TICK_MS = 5_000;
+// 체류 프롬프트 상수(DWELL_*)는 2026-08-06 제거됨 — 즉시 묻지 않는다.
+// 방문은 조용히 쌓이고 '내 행적'((tabs)/trail)에서 사람이 무얼 했는지 고른다.
 
 const STATE_LABEL: Record<ScannerState, { text: string; color: string }> = {
   idle: { text: '대기', color: '#6B7280' },
@@ -100,66 +95,11 @@ export default function ProximityScreen() {
       (msg) => Alert.alert('저장 실패', msg),
     );
 
-  // ── 체류 감지 → 서비스 질문 프롬프트 ──────────────────
-  const createProvision = useCreateServiceProvision();
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [dwellMinutes, setDwellMinutes] = useState(0);
-  const [otherType, setOtherType] = useState<string | null>(null);
-  const [otherResidentId, setOtherResidentId] = useState<string | null>(null);
-  const [adhocBusy, setAdhocBusy] = useState(false);
-  const dwellUuidRef = useRef<string | null>(null);
-  const dwellStartRef = useRef<number>(0);
-  const lastPromptAtRef = useRef<Map<string, number>>(new Map());
-
-  // 최강 비콘이 바뀌면 체류 타이머 리셋
-  useEffect(() => {
-    const uuid = strongest?.uuid ?? null;
-    if (uuid !== dwellUuidRef.current) {
-      dwellUuidRef.current = uuid;
-      dwellStartRef.current = Date.now();
-    }
-  }, [strongest?.uuid]);
-
-  // 주기 점검: 체류 시간 초과 + 입소자 있는 위치 + 쿨다운 지남 → 질문
-  useEffect(() => {
-    if (!scanning) return;
-    const timer = setInterval(() => {
-      const uuid = dwellUuidRef.current;
-      if (!uuid || promptOpen) return;
-      const dwellMs = Date.now() - dwellStartRef.current;
-      if (dwellMs < DWELL_PROMPT_MS) return;
-      const binding = currentBinding;
-      if (!binding || (binding.residents?.length ?? 0) === 0) return;
-      const lastAt = lastPromptAtRef.current.get(uuid) ?? 0;
-      if (Date.now() - lastAt < DWELL_COOLDOWN_MS) return;
-
-      lastPromptAtRef.current.set(uuid, Date.now());
-      setDwellMinutes(Math.round(dwellMs / 60_000));
-      setOtherType(null);
-      setOtherResidentId(binding.residents!.length === 1 ? binding.residents![0].id : null);
-      setPromptOpen(true);
-      // 다른 탭에 있어도 보이도록 로컬 알림 (실패해도 무시 — 프롬프트가 정본)
-      void Notifications.scheduleNotificationAsync({
-        content: {
-          title: `${binding.roomLabel}에 ${Math.round(dwellMs / 60_000)}분째 머무르는 중`,
-          body: '어떤 서비스를 제공하고 계신가요? 앱에서 기록해주세요.',
-        },
-        trigger: null,
-      }).catch(() => {});
-    }, DWELL_TICK_MS);
-    return () => clearInterval(timer);
-  }, [scanning, promptOpen, currentBinding]);
-
-  // 체류 프롬프트용 업무 정렬: 현재 시각과 가장 가까운 미완료 업무가 최우선 (2026-08-05)
-  const promptTasks = useMemo(() => {
-    const residentIds = new Set((currentBinding?.residents ?? []).map((r) => r.id));
-    if (residentIds.size === 0) return { primary: null as DisplayRow | null, rest: [] as DisplayRow[] };
-    const nowMin = toMin(kstNowHHMM());
-    const undone = tasks.rows
-      .filter((r) => residentIds.has(r.residentId) && r.plannedStart && !tasks.provisionFor(r))
-      .sort((a, b) => Math.abs(toMin(a.plannedStart!) - nowMin) - Math.abs(toMin(b.plannedStart!) - nowMin));
-    return { primary: undone[0] ?? null, rest: undone.slice(1, 7) };
-  }, [currentBinding, tasks.rows, tasks.provisionFor]);
+  // ── 체류 질문 프롬프트 제거 (2026-08-06) ──────────────────
+  // 대표 결정: 어르신 앞에서 폰을 꺼내 모달에 답하게 만들지 않는다.
+  // 비콘이 접촉을 조용히 쌓아두고, 나중에 '내 행적'((tabs)/trail)에서 방문마다
+  // "무얼 했는지"만 고르게 한다. 즉시 묻는 창(30초 체류 질문)은 여기서 삭제.
+  // 자동 작성(묻지 않고 채우기)은 데이터가 쌓여 행동 패턴 분석이 된 뒤의 일이다.
 
   // ── 가장 가까운 미등록 기기 원버튼 등록 (2026-08-05) ──
   // 미등록 기기가 수십 개일 때 행별 [등록]은 어느 것이 비콘인지 알 수 없어 무의미.
@@ -198,28 +138,6 @@ export default function ProximityScreen() {
       );
     } finally {
       setNearSearching(false);
-    }
-  };
-
-  /** 시간표 외 업무·라뽀 즉석 기록 — source='beacon'으로 추적 가능하게 */
-  const recordAdhoc = async (serviceType: string, note: string, residentId: string) => {
-    setAdhocBusy(true);
-    try {
-      const created = await createProvision.mutateAsync({
-        residentId,
-        serviceType,
-        serviceDate: tasks.today,
-        startAt: new Date().toISOString(),
-        source: 'beacon',
-        note,
-      });
-      if (created?.warning) Alert.alert('확인 필요', created.warning);
-      setPromptOpen(false);
-      setOtherType(null);
-    } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '네트워크 오류');
-    } finally {
-      setAdhocBusy(false);
     }
   };
 
@@ -554,129 +472,7 @@ export default function ProximityScreen() {
         </View>
       </ScrollView>
 
-      {/* ── 체류 질문 모달 (2026-08-05): 오래 머문 위치에서 무엇을 했는지 ── */}
-      <Modal visible={promptOpen} animationType="slide" transparent onRequestClose={() => setPromptOpen(false)}>
-        <View style={styles.promptBackdrop}>
-          <View style={styles.promptSheet}>
-            <Text style={styles.promptTitle}>
-              {currentBinding?.roomLabel ?? '이 위치'}에 {dwellMinutes}분째 머무르는 중
-            </Text>
-            {/* 이 위치의 입소자 — 웹 등록 이름 하이라이트 */}
-            <View style={styles.promptResidents}>
-              {(currentBinding?.residents ?? []).map((r) => (
-                <View key={r.id} style={styles.promptResidentChip}>
-                  <Text style={styles.promptResidentName}>{r.name}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.promptSub}>어떤 서비스를 제공하고 계신가요?</Text>
-
-            <ScrollView style={{ maxHeight: 400 }}>
-              {/* ① 지금 시각과 가장 가까운 업무 — 최우선 강조 */}
-              {promptTasks.primary && (
-                <>
-                  <Text style={styles.promptSection}>지금 할 업무</Text>
-                  <TouchableOpacity
-                    style={styles.promptPrimary}
-                    disabled={tasks.pendingKeys.has(promptTasks.primary.key)}
-                    onPress={() => { onCheck(promptTasks.primary!); setPromptOpen(false); }}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.promptPrimaryType}>
-                        {serviceTypeLabel(promptTasks.primary.serviceType)}
-                        <Text style={styles.promptPrimaryTime}>  {promptTasks.primary.plannedStart}</Text>
-                      </Text>
-                      <Text style={styles.promptPrimaryText}>
-                        <Text style={styles.promptNameHl}>{promptTasks.primary.residentName}</Text>
-                        {'  '}{promptTasks.primary.note || serviceTypeLabel(promptTasks.primary.serviceType)}
-                      </Text>
-                    </View>
-                    <View style={styles.promptPrimaryBtn}>
-                      <Text style={styles.promptPrimaryBtnText}>진행함</Text>
-                    </View>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {/* ② 나머지 시간표 업무 — 아래에서 선택 */}
-              {promptTasks.rest.length > 0 && (
-                <>
-                  <Text style={styles.promptSection}>다른 시간대 업무</Text>
-                  {promptTasks.rest.map((row) => (
-                    <TouchableOpacity
-                      key={row.key}
-                      style={styles.promptOption}
-                      disabled={tasks.pendingKeys.has(row.key)}
-                      onPress={() => { onCheck(row); setPromptOpen(false); }}
-                    >
-                      <Text style={styles.promptOptionText}>
-                        {row.plannedStart}  <Text style={styles.promptNameHl}>{row.residentName}</Text> — {row.note || serviceTypeLabel(row.serviceType)}
-                      </Text>
-                      <Text style={styles.promptOptionDo}>진행함</Text>
-                    </TouchableOpacity>
-                  ))}
-                </>
-              )}
-
-              {/* ③ 라뽀 (대화·놀이) */}
-              <Text style={styles.promptSection}>라뽀 (대화·놀이)</Text>
-              {(currentBinding?.residents ?? []).map((r) => (
-                <TouchableOpacity
-                  key={`rapport-${r.id}`}
-                  style={[styles.promptOption, styles.promptRapport]}
-                  disabled={adhocBusy}
-                  onPress={() => void recordAdhoc('routine', '라뽀 — 대화·놀이(정서지원)', r.id)}
-                >
-                  <Text style={styles.promptOptionText}>{r.name}님과 대화·놀이</Text>
-                  <MaterialCommunityIcons name="heart-outline" size={18} color="#DB2777" />
-                </TouchableOpacity>
-              ))}
-
-              {/* ④ 시간표에 없는 업무 */}
-              <Text style={styles.promptSection}>다른 업무</Text>
-              <View style={styles.promptChips}>
-                {SERVICE_TYPES.map((t) => (
-                  <TouchableOpacity
-                    key={t.value}
-                    style={[styles.promptChip, otherType === t.value && styles.promptChipOn]}
-                    onPress={() => setOtherType(otherType === t.value ? null : t.value)}
-                  >
-                    <Text style={[styles.promptChipText, otherType === t.value && styles.promptChipTextOn]}>{t.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {otherType && (currentBinding?.residents?.length ?? 0) > 1 && (
-                <View style={styles.promptChips}>
-                  {(currentBinding?.residents ?? []).map((r) => (
-                    <TouchableOpacity
-                      key={`res-${r.id}`}
-                      style={[styles.promptChip, otherResidentId === r.id && styles.promptChipOn]}
-                      onPress={() => setOtherResidentId(r.id)}
-                    >
-                      <Text style={[styles.promptChipText, otherResidentId === r.id && styles.promptChipTextOn]}>{r.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-              {otherType && (
-                <TouchableOpacity
-                  style={[styles.promptSubmit, (!otherResidentId || adhocBusy) && { opacity: 0.4 }]}
-                  disabled={!otherResidentId || adhocBusy}
-                  onPress={() => otherResidentId && void recordAdhoc(otherType, '[비콘] 현장 확인 기록', otherResidentId)}
-                >
-                  <Text style={styles.promptSubmitText}>
-                    {adhocBusy ? '기록 중…' : `${serviceTypeLabel(otherType)} 기록`}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-
-            <TouchableOpacity style={styles.promptLater} onPress={() => setPromptOpen(false)}>
-              <Text style={styles.promptLaterText}>나중에</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* 체류 질문 모달 제거(2026-08-06) — 즉시 묻지 않는다. 방문은 '내 행적'에서 기록. */}
     </SafeAreaView>
   );
 }

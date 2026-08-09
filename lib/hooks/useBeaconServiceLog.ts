@@ -22,11 +22,6 @@ import type { BeaconStatus, ProximityEvent } from '../beacon/types';
 import type { ScannerState } from '../beacon/scanner';
 import type { ServiceProvision } from './useServiceProvisions';
 
-// ── 수동 선택 대기 항목 ────────────────────────────────────────
-export interface PendingSelection {
-  event: ProximityEvent;
-  id: string; // 고유 키
-}
 
 export interface UseBeaconServiceLogResult {
   // BLE 상태 (proximity 그대로 전달)
@@ -47,7 +42,6 @@ export interface UseBeaconServiceLogResult {
   todayProvisions: ServiceProvision[];
   provisionsLoading: boolean;
   /** 수동 선택이 필요한 이벤트 큐. */
-  pendingSelections: PendingSelection[];
   serviceError: string | null;
   /** 서버가 돌려준 처리 결과 문구(정합 수행 등). 없으면 null. */
   serverMessage: string | null;
@@ -60,10 +54,6 @@ export interface UseBeaconServiceLogResult {
   };
 
   // 액션
-  /** 수동 선택 확정 → draft 생성. */
-  resolveSelection: (selId: string, residentId: string, serviceType: string, scheduleId?: string | null) => void;
-  /** 수동 선택 취소. */
-  dismissSelection: (selId: string) => void;
 }
 
 // 오늘 날짜(KST) 'YYYY-MM-DD'
@@ -71,7 +61,6 @@ function todayKst(): string {
   return format(new Date(Date.now() + 9 * 3600_000), 'yyyy-MM-dd');
 }
 
-let selCounter = 0;
 
 export function useBeaconServiceLog(): UseBeaconServiceLogResult {
   const staffId = useAuthStore((s) => s.session?.user.staffId ?? null);
@@ -99,20 +88,13 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
   const [serverMessage, setServerMessage] = useState<string | null>(null);
   const qc = useQueryClient();
 
-  // 수동 선택 큐
-  const [pendingSelections, setPendingSelections] = useState<PendingSelection[]>([]);
-  const pendingEventRef = useRef<Map<string, ProximityEvent>>(new Map()); // selId → event
+  // 수동 선택 큐 제거(2026-08-06) — 즉시 묻지 않는다. '내 행적' 화면에서 나중에 고른다.
 
   // ServiceRecorder (1회 생성).
   // 2026-08-06: 초안 생성은 서버가 단독 수행 — 여기서는 mutation 을 주입하지 않는다.
   const recorderRef = useRef<ServiceRecorder | null>(null);
   if (!recorderRef.current) {
     recorderRef.current = new ServiceRecorder({
-      onNeedSelection: (event) => {
-        const selId = `sel-${++selCounter}`;
-        pendingEventRef.current.set(selId, event);
-        setPendingSelections((prev) => [...prev, { event, id: selId }]);
-      },
       onDraftCreated: () => {
         setServiceError(null);
         void qc.invalidateQueries({ queryKey: ['service-provisions'] });
@@ -160,27 +142,6 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
     }
   }, [events, staffId, refreshOpen]);
 
-  // 수동 선택 확정
-  const resolveSelection = useCallback(
-    (selId: string, residentId: string, serviceType: string, scheduleId?: string | null) => {
-      if (!staffId) return;
-      const event = pendingEventRef.current.get(selId);
-      if (!event) return;
-      void recorderRef.current
-        ?.createManual(event, staffId, residentId, serviceType, scheduleId)
-        .then(refreshOpen);
-      pendingEventRef.current.delete(selId);
-      setPendingSelections((prev) => prev.filter((p) => p.id !== selId));
-    },
-    [staffId, refreshOpen],
-  );
-
-  const dismissSelection = useCallback((selId: string) => {
-    const event = pendingEventRef.current.get(selId);
-    if (event) recorderRef.current?.dismissPending(event.uuid); // Bug4 fix: pending uuid 해제
-    pendingEventRef.current.delete(selId);
-    setPendingSelections((prev) => prev.filter((p) => p.id !== selId));
-  }, []);
 
   // 오늘 요약
   const todaySummary = useMemo(() => {
@@ -205,11 +166,8 @@ export function useBeaconServiceLog(): UseBeaconServiceLogResult {
     openServices,
     todayProvisions,
     provisionsLoading,
-    pendingSelections,
     serviceError,
     serverMessage,
     todaySummary,
-    resolveSelection,
-    dismissSelection,
   };
 }

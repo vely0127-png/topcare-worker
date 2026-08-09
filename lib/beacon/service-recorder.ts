@@ -34,8 +34,8 @@ export interface OpenService {
 }
 
 export interface ServiceRecorderOptions {
-  /** 스케줄 자동 매칭 실패 시 호출 — 수동 선택 UI 트리거. */
-  onNeedSelection?: (event: ProximityEvent) => void;
+  // onNeedSelection 제거(2026-08-06) — 매칭 실패해도 그 자리에서 묻지 않는다.
+  //   체류만 남기고 '내 행적'에서 나중에 고른다. 즉시 프롬프트를 되살리지 말 것.
   /** 초안 생성 성공 콜백. */
   onDraftCreated?: (provisionId: string, auto: boolean) => void;
   /** exit 처리 완료 콜백. */
@@ -60,10 +60,10 @@ export class ServiceRecorder {
   private openMap = new Map<string, OpenService>(); // uuid → open service
   private schedules: ServiceSchedule[] = [];
   /**
-   * [Bug4 fix] 수동 선택 대기 중인 uuid 집합.
-   * 이미 onNeedSelection 이 발생한 uuid에 대해 enter 이벤트가 또 오면 무시.
+   * enter 는 보냈지만 서비스 초안이 없는 방문의 uuid.
+   * (시간표 매칭 실패 → event-only). exit 을 짝지어 보내기 위해 기억한다.
    */
-  private pendingSelectionUuids = new Set<string>();
+  private openNoProvisionUuids = new Set<string>();
 
   constructor(private opts: ServiceRecorderOptions) {}
 
@@ -75,7 +75,7 @@ export class ServiceRecorder {
   /** enter 이벤트 처리. */
   async handleEnter(event: ProximityEvent, staffId: string): Promise<void> {
     // 이미 열려 있는 서비스 또는 수동 선택 대기 중이면 무시 (Bug4 fix)
-    if (this.openMap.has(event.uuid) || this.pendingSelectionUuids.has(event.uuid)) return;
+    if (this.openMap.has(event.uuid) || this.openNoProvisionUuids.has(event.uuid)) return;
 
     // 담당 입소자가 확정되지 않은 비콘(미등록·호실 폴백)은 체류를 남기지 않는다.
     const resident = soleResidentOf(event.uuid);
@@ -114,9 +114,12 @@ export class ServiceRecorder {
         });
         this.opts.onDraftCreated?.(res.provision.id, true);
       } else {
-        // 체류는 남았지만 무슨 서비스인지 모른다 → 사람에게 물어본다
-        this.pendingSelectionUuids.add(event.uuid);
-        this.opts.onNeedSelection?.(event);
+        // 체류는 남았지만 무슨 서비스인지 모른다.
+        // 2026-08-06: **그 자리에서 묻지 않는다.** 어르신 앞에서 폰을 꺼내게 만들지 않는 게
+        // 대표 결정이다. 사실(enter)만 서버에 남기고, '무얼 했는지'는 나중에
+        // '내 행적' 화면에서 방문 단위로 고른다(mode='provision-only').
+        // 여기서는 exit 을 짝지어 보낼 수 있도록 uuid 만 기억해 둔다.
+        this.openNoProvisionUuids.add(event.uuid);
       }
     } catch (e) {
       this.opts.onError?.('enter', e instanceof Error ? e : new Error(String(e)));
@@ -136,7 +139,7 @@ export class ServiceRecorder {
     scheduleId?: string | null,
   ): Promise<void> {
     if (this.openMap.has(event.uuid)) return;
-    this.pendingSelectionUuids.delete(event.uuid);
+    this.openNoProvisionUuids.delete(event.uuid);
 
     const occurredAt = new Date(event.at).toISOString();
     try {
@@ -169,13 +172,13 @@ export class ServiceRecorder {
 
   /** 수동 선택 취소 — pending uuid 해제. */
   dismissPending(uuid: string): void {
-    this.pendingSelectionUuids.delete(uuid);
+    this.openNoProvisionUuids.delete(uuid);
   }
 
   /** exit 이벤트 처리. */
   async handleExit(event: ProximityEvent): Promise<void> {
     const open = this.openMap.get(event.uuid);
-    const pending = this.pendingSelectionUuids.has(event.uuid);
+    const pending = this.openNoProvisionUuids.has(event.uuid);
     // 열린 서비스도 없고 대기 중도 아니면, 이 비콘에서 enter 를 보낸 적이 없다 → 짝 없는 exit 금지
     if (!open && !pending) return;
 
@@ -197,7 +200,7 @@ export class ServiceRecorder {
         distanceM: event.distanceMeters,
       });
       this.openMap.delete(event.uuid);
-      this.pendingSelectionUuids.delete(event.uuid);
+      this.openNoProvisionUuids.delete(event.uuid);
       this.opts.onServiceEnded?.(open?.provisionId ?? null, occurredAt);
     } catch (e) {
       this.opts.onError?.('exit', e instanceof Error ? e : new Error(String(e)));
@@ -212,7 +215,7 @@ export class ServiceRecorder {
   /** 상태 초기화 (로그아웃 등). */
   reset(): void {
     this.openMap.clear();
-    this.pendingSelectionUuids.clear();
+    this.openNoProvisionUuids.clear();
   }
 
   // ── 내부 ──────────────────────────────────────────────────

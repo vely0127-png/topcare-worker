@@ -21,7 +21,6 @@ import { useConfirmServiceProvision } from '@/lib/hooks/useServiceProvisions';
 import { useAlerts } from '@/lib/hooks/useAlerts';
 import { useResidents } from '@/lib/hooks/useResidents';
 import type { ServiceProvision, ProvisionStatus } from '@/lib/hooks/useServiceProvisions';
-import type { PendingSelection } from '@/lib/hooks/useBeaconServiceLog';
 import { SERVICE_TYPES, serviceTypeLabel } from '@/lib/care/service-rules';
 import { beaconRegistry } from '@/lib/beacon';
 
@@ -133,108 +132,16 @@ function ProvisionCard({
   );
 }
 
-// ── 수동 선택 모달 ────────────────────────────────────────────
-function SelectionModal({
-  pending,
-  residents,
-  onResolve,
-  onDismiss,
-}: {
-  pending: PendingSelection;
-  residents: { id: string; name: string; room: string | null }[];
-  onResolve: (residentId: string, serviceType: string) => void;
-  onDismiss: () => void;
-}) {
-  // 현재 비콘의 담당 입소자(웹 등록부) — 하이라이트·선선택·앞정렬 (2026-08-05)
-  const binding = beaconRegistry.get(pending.event.uuid);
-  const assignedIds = new Set((binding?.residents ?? []).map((r) => r.id));
-  const [selectedResident, setSelectedResident] = useState(
-    binding?.residents?.length === 1 ? binding.residents[0].id : '',
-  );
-  const [selectedService, setSelectedService] = useState('');
-  const orderedResidents = [
-    ...residents.filter((r) => assignedIds.has(r.id)),
-    ...residents.filter((r) => !assignedIds.has(r.id)),
-  ];
-
-  // P0-4(2026-07-27): serviceType은 웹 코드값 정본 — 한글 라벨을 값으로 보내면
-  // 관찰·식사·투약 자동 연동과 개인계획 경고(C5)가 전부 미발동된다.
-  const SERVICE_CHOICES = SERVICE_TYPES.filter((t) => t.value !== 'routine');
-
-  return (
-    <Modal transparent animationType="slide" visible onRequestClose={onDismiss}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>서비스 기록 확인 필요</Text>
-          <Text style={styles.modalDesc}>
-            {binding?.roomLabel
-              ? `${binding.roomLabel} 비콘 진입이 감지되었습니다. 어떤 서비스를 제공하시나요?`
-              : '비콘 진입이 감지되었습니다. 어느 어르신께 어떤 서비스를 제공하시나요?'}
-          </Text>
-          <Text style={styles.modalLabel}>입주자 선택</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.hScroll}>
-            <View style={styles.chipRow}>
-              {orderedResidents.map((r) => {
-                const isAssigned = assignedIds.has(r.id);
-                const isOn = selectedResident === r.id;
-                return (
-                  <TouchableOpacity
-                    key={r.id}
-                    style={[styles.chip, isAssigned && styles.chipAssigned, isOn && styles.chipOn]}
-                    onPress={() => setSelectedResident(r.id)}
-                  >
-                    <Text style={[styles.chipText, isAssigned && styles.chipTextAssigned, isOn && styles.chipTextOn]}>
-                      {isAssigned ? '⦿ ' : ''}{r.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
-
-          <Text style={[styles.modalLabel, { marginTop: 12 }]}>서비스 종류</Text>
-          <View style={styles.chipGrid}>
-            {SERVICE_CHOICES.map((s) => (
-              <TouchableOpacity
-                key={s.value}
-                style={[styles.chip, selectedService === s.value && styles.chipOn]}
-                onPress={() => setSelectedService(s.value)}
-              >
-                <Text style={[styles.chipText, selectedService === s.value && styles.chipTextOn]}>{s.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <View style={styles.modalActions}>
-            <TouchableOpacity style={styles.modalCancel} onPress={onDismiss}>
-              <Text style={styles.modalCancelText}>취소</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modalConfirm,
-                (!selectedResident || !selectedService) && styles.modalConfirmDisabled,
-              ]}
-              disabled={!selectedResident || !selectedService}
-              onPress={() => onResolve(selectedResident, selectedService)}
-            >
-              <Text style={styles.modalConfirmText}>기록 시작</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
+// 수동 선택 모달 제거(2026-08-06) — 매칭 실패해도 그 자리에서 묻지 않는다.
+//   체류만 남기고 '내 행적'((tabs)/trail)에서 방문마다 무얼 했는지 고른다.
 
 // ── 메인 화면 ─────────────────────────────────────────────────
 export default function ServiceLogScreen() {
   const {
     supported, scanning, scannerState,
     openServices, todayProvisions, provisionsLoading,
-    pendingSelections, serviceError, bleError, todaySummary,
+    serviceError, bleError, todaySummary,
     start, stop,
-    resolveSelection, dismissSelection,
   } = useBeaconServiceLog();
 
   const { mutate: confirmProvision, isPending: isConfirming } = useConfirmServiceProvision();
@@ -296,17 +203,9 @@ export default function ServiceLogScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      {/* 수동 선택 모달 — 스택 최상위 */}
-      {pendingSelections[0] && (
-        <SelectionModal
-          pending={pendingSelections[0]}
-          residents={residents}
-          onResolve={(residentId, serviceType) =>
-            resolveSelection(pendingSelections[0].id, residentId, serviceType)
-          }
-          onDismiss={() => dismissSelection(pendingSelections[0].id)}
-        />
-      )}
+      {/* 수동 선택 모달 제거 (2026-08-06)
+          시간표 매칭이 안 된 방문에 그 자리에서 묻지 않는다. 체류 사실만 남기고,
+          '무얼 했는지'는 나중에 '내 행적'((tabs)/trail)에서 방문마다 고른다. */}
 
       <ScrollView contentContainerStyle={styles.content}>
         {/* BLE 스캔 토글 */}
