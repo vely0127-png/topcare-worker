@@ -41,6 +41,22 @@ const SWEEP_INTERVAL_MS = 3_000;
 /** 이 시간 안에 관측된 비콘만 '현재 위치' 후보 (ms) */
 const STRONGEST_FRESH_MS = 15_000;
 
+/**
+ * 1·2등 신호 차이가 이 값 미만이면 **'현재 위치'를 단정하지 않는다** (dB).
+ *
+ * 왜 필요한가 (2026-08-06 실측)
+ *   같은 1m 거리에서 RSSI 산포가 1σ = 6.6dB, 전체 범위 41dB였다.
+ *   반면 침대가 0.5m 떨어져 생기는 신호차는 5.3dB뿐이다(n=3.0).
+ *   즉 **옆 침대 비콘이 더 세게 잡히는 건 예외가 아니라 정상 범위 안의 일**이라,
+ *   차이 없이 1등을 단정하면 엉뚱한 입소자에게 기록이 붙는다.
+ *
+ * 그래서 애매하면 단정하지 않고 후보를 넘겨 사람이 고르게 한다(가짜 성공 금지).
+ * 값 근거는 위 산포 1σ. 현장에서 "너무 자주 물어본다" 하면 낮추고,
+ * "옆 사람으로 잘못 잡힌다" 하면 올린다.
+ * 상세: topcare/작업일지/2026-08_10_비콘_거리캘리브레이션.md
+ */
+const AMBIGUITY_MARGIN_DB = 6;
+
 /** 서버 비콘 등록부(/api/beacons) 응답 행 */
 interface ServerBeacon {
   id: string;
@@ -96,10 +112,24 @@ export interface UseBeaconProximityResult {
   stop: () => void;
   /** 엔진의 실시간 상태 스냅샷 — 3초 주기 state와 달리 즉시값 (근접 등록 재탐색용) */
   getStatuses: () => BeaconStatus[];
-  /** 최근(15초) 관측 중 신호가 가장 센 비콘 = 현재 위치 후보 (2026-08-05) */
+  /**
+   * 현재 위치로 **확정된** 비콘. 확정 못 하면 null.
+   * 1·2등 차이가 AMBIGUITY_MARGIN_DB 미만이면 단정하지 않는다(candidates 참조).
+   */
   strongest: BeaconStatus | null;
-  /** strongest의 등록부 정보 — 호실 라벨·해당 위치 입소자 */
+  /** strongest의 등록부 정보 — 호실 라벨·해당 위치 입소자. 애매하면 null */
   currentBinding: BeaconBinding | null;
+  /**
+   * 신호 최상위와 AMBIGUITY_MARGIN_DB 이내인 등록 비콘들(센 순).
+   * 길이 1 = 확정 / 2 이상 = **애매함, 사람이 골라야 함**.
+   */
+  candidates: BeaconStatus[];
+  /** 후보가 2개 이상이고 아직 사람이 고르지 않은 상태 */
+  ambiguous: boolean;
+  /** 사람이 고른 비콘 uuid (없으면 null). 그 자리를 벗어나면 자동 해제 */
+  pickedUuid: string | null;
+  /** 후보 중 하나를 '여기다'라고 확정 */
+  pickCandidate: (uuid: string | null) => void;
   /** 사용자가 직접 멈춘 상태인지 — 자동 재시작을 하지 않는다 */
   manuallyPaused: boolean;
 }
@@ -125,6 +155,8 @@ export function BeaconProvider({ children }: { children: React.ReactNode }) {
   const [attendance, setAttendance] = useState<BeaconAttendanceState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manuallyPaused, setManuallyPaused] = useState(false);
+  /** 후보가 애매할 때 사람이 고른 자리 */
+  const [pickedUuid, setPickedUuid] = useState<string | null>(null);
 
   const engineRef = useRef<ProximityEngine | null>(null);
   const scannerRef = useRef<BleBeaconScanner | null>(null);
@@ -269,17 +301,47 @@ export function BeaconProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  // ── 현재 위치 판정 (2026-08-05): 최근 관측 + 신호 최강 — 등록된 비콘만 후보
+  // ── 현재 위치 판정 (2026-08-05, 2026-08-06 애매 판정 추가) ──
+  // 최근 관측 + 신호 상위 — 등록된 비콘만 후보
   // (주변 스마트폰·이어폰 등 미등록 기기가 '현재 위치'를 차지하면 안 됨)
-  const strongest = useMemo<BeaconStatus | null>(() => {
+  //
+  // 2026-08-06: 1등만 뽑던 것을 **상위 마진 이내 전부**로 바꿨다. 침대 간격이
+  // 좁으면 옆 침대가 더 세게 잡히는 일이 정상 범위 안에서 일어나기 때문
+  // (AMBIGUITY_MARGIN_DB 주석 참조). 애매하면 단정하지 않고 사람에게 넘긴다.
+  const candidates = useMemo<BeaconStatus[]>(() => {
     const now = Date.now();
     const fresh = beacons.filter(
       (b) => b.lastSeenAt != null && now - b.lastSeenAt <= STRONGEST_FRESH_MS
         && b.smoothedRssi != null && beaconRegistry.has(b.uuid),
     );
-    if (fresh.length === 0) return null;
-    return fresh.reduce((best, b) => ((b.smoothedRssi ?? -999) > (best.smoothedRssi ?? -999) ? b : best));
+    if (fresh.length === 0) return [];
+    const sorted = [...fresh].sort(
+      (a, b) => (b.smoothedRssi ?? -999) - (a.smoothedRssi ?? -999),
+    );
+    const top = sorted[0].smoothedRssi ?? -999;
+    return sorted.filter((b) => top - (b.smoothedRssi ?? -999) < AMBIGUITY_MARGIN_DB);
   }, [beacons]);
+
+  // 사람이 고른 자리가 후보에서 사라지면(그 자리를 벗어남) 선택 해제
+  useEffect(() => {
+    if (pickedUuid && !candidates.some((c) => c.uuid === pickedUuid)) {
+      setPickedUuid(null);
+    }
+  }, [candidates, pickedUuid]);
+
+  const strongest = useMemo<BeaconStatus | null>(() => {
+    if (candidates.length === 0) return null;
+    if (pickedUuid) {
+      const picked = candidates.find((c) => c.uuid === pickedUuid);
+      if (picked) return picked; // 사람이 고른 게 최우선
+    }
+    // 후보가 여럿이면 **확정하지 않는다** — 화면이 candidates로 물어봐야 한다
+    return candidates.length === 1 ? candidates[0] : null;
+  }, [candidates, pickedUuid]);
+
+  const ambiguous = candidates.length > 1 && !strongest;
+
+  const pickCandidate = useCallback((uuid: string | null) => setPickedUuid(uuid), []);
 
   const currentBinding = useMemo<BeaconBinding | null>(
     () => (strongest ? beaconRegistry.get(strongest.uuid) ?? null : null),
@@ -301,10 +363,15 @@ export function BeaconProvider({ children }: { children: React.ReactNode }) {
     getStatuses,
     strongest,
     currentBinding,
+    candidates,
+    ambiguous,
+    pickedUuid,
+    pickCandidate,
     manuallyPaused,
   }), [
     supported, scannerState, beacons, events, attendance, error,
-    start, stop, getStatuses, strongest, currentBinding, manuallyPaused,
+    start, stop, getStatuses, strongest, currentBinding,
+    candidates, ambiguous, pickedUuid, pickCandidate, manuallyPaused,
   ]);
 
   return <BeaconContext.Provider value={value}>{children}</BeaconContext.Provider>;

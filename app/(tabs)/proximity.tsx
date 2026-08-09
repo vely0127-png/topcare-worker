@@ -66,6 +66,9 @@ export default function ProximityScreen() {
     getStatuses,
     strongest,
     currentBinding,
+    candidates,
+    ambiguous,
+    pickCandidate,
     manuallyPaused,
   } = useBeaconProximity();
 
@@ -310,6 +313,43 @@ export default function ProximityScreen() {
         {error && (
           <View style={styles.errorCard}>
             <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        {/* ── 자리가 애매할 때: 단정하지 않고 사람에게 물어본다 (2026-08-06) ──
+            침대 간격이 좁으면 옆 침대가 더 세게 잡히는 게 정상 범위 안의 일이라
+            (1m 실측 산포 6.6dB > 0.5m 간격 신호차 5.3dB), 신호만으로 못 고른다.
+            잘못 고르면 엉뚱한 어르신께 기록이 붙으므로 여기서 멈춘다. */}
+        {scanning && ambiguous && (
+          <View style={styles.ambiguousCard}>
+            <View style={styles.ambiguousHeader}>
+              <MaterialCommunityIcons name="help-circle" size={26} color="#B45309" />
+              <Text style={styles.ambiguousTitle}>어느 자리에 계신가요?</Text>
+            </View>
+            <Text style={styles.ambiguousHint}>
+              신호가 비슷해서 자리를 정할 수 없습니다. 지금 계신 곳을 눌러주세요.
+            </Text>
+            {candidates.slice(0, 4).map((c) => {
+              const b = beaconRegistry.get(c.uuid);
+              const names = (b?.residents ?? []).map((r) => r.name).join(', ');
+              return (
+                <TouchableOpacity
+                  key={c.uuid}
+                  style={styles.ambiguousBtn}
+                  onPress={() => pickCandidate(c.uuid)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ambiguousBtnName}>
+                      {names || b?.roomLabel || '이름 미배정'}
+                    </Text>
+                    <Text style={styles.ambiguousBtnMeta}>
+                      {b?.roomLabel ?? '—'} · {c.smoothedRssi?.toFixed(0) ?? '—'} dBm
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={28} color="#B45309" />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
 
@@ -755,6 +795,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF3C7', borderRadius: 10, padding: 14,
   },
   pausedText: { flex: 1, color: '#92400E', fontSize: 16, fontWeight: '600', lineHeight: 23 },
+  // 자리 애매 — 사람이 고르는 카드 (2026-08-06)
+  ambiguousCard: {
+    backgroundColor: '#FFFBEB', borderRadius: 12, padding: 16, gap: 10,
+    borderWidth: 2, borderColor: '#F59E0B',
+  },
+  ambiguousHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ambiguousTitle: { fontSize: 20, fontWeight: '700', color: '#92400E' },
+  ambiguousHint: { fontSize: 15, color: '#92400E', lineHeight: 22 },
+  ambiguousBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 16,
+    minHeight: 68, borderWidth: 1, borderColor: '#FCD34D',
+  },
+  ambiguousBtnName: { fontSize: 19, fontWeight: '700', color: '#111827' },
+  ambiguousBtnMeta: { fontSize: 14, color: '#92400E', marginTop: 2 },
   scanBtnStart: { backgroundColor: '#1A5276' },
   scanBtnStop: { backgroundColor: '#DC2626' },
   scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },

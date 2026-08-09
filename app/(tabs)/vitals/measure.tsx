@@ -92,7 +92,7 @@ export default function VitalMeasureScreen() {
   // ── 비콘 연동 (2026-08-06 대표 지시: "바이탈 측정할 때도 스캔") ──
   // 침대마다 비콘이 있으므로 어르신 앞에 서면 그분 화면이 떠 있어야 한다.
   // 스캔은 앱 전역에서 이미 돌고 있다(BeaconProvider) — 여기서는 결과만 읽는다.
-  const { scanning: beaconScanning, currentBinding } = useBeaconProximity();
+  const { scanning: beaconScanning, currentBinding, ambiguous: beaconAmbiguous } = useBeaconProximity();
 
   // 담당 입소자가 **정확히 1명**으로 확정된 비콘만 신뢰한다.
   // 호실 폴백(여러 명)이면 누구 앞인지 알 수 없으므로 아무 것도 하지 않는다.
@@ -237,10 +237,15 @@ export default function VitalMeasureScreen() {
         <View style={[styles.trackFill, { width: `${(doneCount / residents.length) * 100}%` }]} />
       </View>
 
-      {/* 스캔이 꺼져 있으면 왜 자리 인식이 안 되는지 정직하게 알린다 */}
+      {/* 자리 인식이 안 되는 이유를 정직하게 알린다 — 조용히 안 되는 게 제일 나쁘다 */}
       {!beaconScanning ? (
         <Text style={styles.scanOffNote}>
           비콘 스캔이 꺼져 있어 자리 자동 인식이 안 됩니다 — 명단 순서로 진행합니다.
+        </Text>
+      ) : beaconAmbiguous ? (
+        <Text style={styles.scanOffNote}>
+          가까운 자리가 여럿이라 자동 이동을 하지 않았습니다 — 명단 순서로 진행하세요.
+          (근접 화면에서 자리를 고르면 여기에도 반영됩니다)
         </Text>
       ) : null}
 
