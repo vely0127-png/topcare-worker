@@ -13,3 +13,7 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
+
+# Play upload key (2026-08-21) - NEVER commit
+app/upload.keystore
+keystore.properties
