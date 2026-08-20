@@ -8,6 +8,7 @@ export default function NurseAssistantHome() {
 
   const actions = useMemo<QuickAction[]>(() => [
     { key: 'vitals-measure', label: '바이탈 측정', href: '/(tabs)/vitals/measure', hint: '오전 라운드 — 한 분씩', icon: 'thermometer', primary: true },
+    { key: 'workboard', label: '공동 작업판', href: '/(tabs)/workboard', hint: '지금 이 시간의 계획·완료 현황', icon: 'view-dashboard' },
     { key: 'trail', label: '내 행적', href: '/(tabs)/trail', hint: '다녀온 곳에 무얼 했는지 기록', icon: 'map-marker-path', badge: pendingCount },
     { key: 'vitals', label: '바이탈 현황', href: '/(tabs)/vitals', hint: '오늘 측정값·이상 확인', icon: 'heart-pulse' },
     { key: 'care-log', label: '케어 기록', href: '/(tabs)/care-log', hint: '서비스 기록', icon: 'clipboard-edit' },

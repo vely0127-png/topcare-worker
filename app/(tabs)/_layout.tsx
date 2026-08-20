@@ -45,6 +45,7 @@ export default function TaskStackLayout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: '오늘 할 일' }} />
+      <Stack.Screen name="workboard" options={{ title: '공동 작업판' }} />
       <Stack.Screen name="todos/index" options={{ title: '지시 업무' }} />
       <Stack.Screen name="vitals/index" options={{ title: '바이탈 현황' }} />
       <Stack.Screen name="vitals/measure" options={{ title: '바이탈 측정' }} />

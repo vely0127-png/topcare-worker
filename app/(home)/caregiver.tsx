@@ -8,7 +8,9 @@ export default function CaregiverHome() {
   const { pendingCount } = useTrail();
 
   const actions = useMemo<QuickAction[]>(() => [
-    { key: 'shift', label: '오늘 할 일', href: '/(tabs)', hint: '서비스 체크리스트 (기록지 연동)', icon: 'clipboard-list', primary: true },
+    // v2.0 (2026-08-21): 공동 작업판 — 근무 중 모두가 같은 판, 정상은 1탭 (UIUX 철학 ③④)
+    { key: 'workboard', label: '공동 작업판', href: '/(tabs)/workboard', hint: '지금 이 시간, 누구에게 무엇을 — 다 같이 보는 판', icon: 'view-dashboard', primary: true },
+    { key: 'shift', label: '오늘 할 일', href: '/(tabs)', hint: '서비스 체크리스트 (기록지 연동)', icon: 'clipboard-list' },
     { key: 'trail', label: '내 행적', href: '/(tabs)/trail', hint: '다녀온 곳에 무얼 했는지 기록', icon: 'map-marker-path', badge: pendingCount },
     { key: 'todos', label: '지시 업무', href: '/(tabs)/todos', hint: '관리자 지시·추가 업무', icon: 'account-check' },
     { key: 'care-log', label: '케어 기록', href: '/(tabs)/care-log', hint: '배변·목욕·관찰', icon: 'clipboard-edit' },
