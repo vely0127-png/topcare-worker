@@ -22,7 +22,14 @@
  * 정직성
  *   - 조회 실패는 빈 판으로 위장하지 않는다(배너+재시도).
  *   - POST 응답 warning(개인계획 없음 등)은 반드시 사용자에게 보여준다.
- *   - 동시 체크 경합의 서버측 차단(409)은 미구현 — 20초 갱신으로 완화, SCREENS.md 공백 참조.
+ *   - 동시 체크 경합은 서버 409로 차단됨(d564e48) + 20초 갱신.
+ *
+ * 2026-08-23 워커앱 자체 점검 수정 4건 (웹 사용성 평가와 같은 눈으로 검사)
+ *   ① 되돌리기 부재 → 내가 기록한 건만 [되돌리기](DELETE). 잘못 눌러도 관리자 전화 불필요.
+ *      useDeleteServiceProvision 훅은 있었는데 이 화면이 호출하지 않는 고아 상태였다(웹과 같은 패턴).
+ *   ② 기록 시각을 startAt.slice(11,16)으로 찍어 UTC가 보였다(웹 P1-02와 동일 버그) → toKSTTime.
+ *   ③ 예외(거부·일부·이상)도 초록 완료로 보였다 → 주황 '예외' 배지로 구분(상태 가시성).
+ *   ④ [남은 N건 모두 완료]가 병렬 요청 + 실패마다 알림 폭탄이었다 → 순차 저장 후 결과 1회 요약.
  */
 import { useMemo, useState } from 'react';
 import {
@@ -33,10 +40,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useServiceSchedules, hhmmToMin, type ServiceSchedule } from '@/lib/hooks/useServiceSchedules';
-import { useServiceProvisions, useCreateServiceProvision, type ServiceProvision } from '@/lib/hooks/useServiceProvisions';
+import { useServiceProvisions, useCreateServiceProvision, useDeleteServiceProvision, type ServiceProvision } from '@/lib/hooks/useServiceProvisions';
 import { useSession } from '@/lib/hooks/useAuth';
 import { serviceTypeLabel } from '@/lib/care/service-rules';
-import { getKSTToday } from '@/lib/utils/date';
+import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 /** 예외 선택지 — 큰 버튼 3종 + 메모는 다음 단계(음성 입력) 예정 */
@@ -45,6 +52,11 @@ const EXCEPTIONS = [
   { key: 'partial', label: '절반만·일부만', note: '일부만 제공함' },
   { key: 'issue', label: '이상 발견', note: '제공 중 이상 소견 — 간호 확인 필요' },
 ] as const;
+
+/** 예외로 기록된 건인가 — note가 예외 문구와 일치하면 예외(완료와 시각적으로 구분) */
+const EXCEPTION_NOTES: string[] = EXCEPTIONS.map((e) => e.note);
+const isExceptionRecord = (p: ServiceProvision | null) =>
+  !!p?.note && EXCEPTION_NOTES.includes(p.note);
 
 type Row = {
   schedule: ServiceSchedule;
@@ -56,11 +68,13 @@ export default function WorkboardScreen() {
   const session = useSession();
   const staffId = session?.user.staffId ?? null;
   const today = getKSTToday();
+  const { mutate: deleteProvision } = useDeleteServiceProvision();
+  const [undoingIds, setUndoingIds] = useState<Set<string>>(new Set());
   const todayDow = new Date(`${today}T12:00:00+09:00`).getDay();
 
   const schedulesQ = useServiceSchedules({ isActive: true });
   const provisionsQ = useServiceProvisions({ date: today, limit: 300 });
-  const { mutate: createProvision, isPending: isSaving } = useCreateServiceProvision();
+  const { mutate: createProvision, isPending: isSaving , mutateAsync: createProvisionAsync } = useCreateServiceProvision();
 
   const [exceptionFor, setExceptionFor] = useState<Row | null>(null);
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
@@ -133,6 +147,42 @@ export default function WorkboardScreen() {
     );
   };
 
+  // ① 되돌리기 (2026-08-23 자체 점검): 잘못 누른 체크를 현장에서 되돌린다.
+  //    남의 기록은 지우지 않는다 — 내가 기록한 건만. 서버가 연동 관찰기록도 함께 정리한다.
+  const undo = (row: Row) => {
+    const done = row.done;
+    if (!done) return;
+    if (staffId && done.staffId && done.staffId !== staffId) {
+      RNAlert.alert('되돌릴 수 없음', `${done.staffName ?? '다른 직원'}님이 기록한 건입니다. 본인이 기록한 것만 되돌릴 수 있습니다.`);
+      return;
+    }
+    RNAlert.alert(
+      '기록을 되돌릴까요?',
+      `${row.schedule.residentName ?? ''} — ${serviceTypeLabel(row.schedule.serviceType)} 기록을 삭제합니다.`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '되돌리기',
+          style: 'destructive',
+          onPress: () => {
+            setUndoingIds((prev) => new Set(prev).add(done.id));
+            deleteProvision(
+              { id: done.id },
+              {
+                onError: (e: any) => RNAlert.alert('되돌리기 실패', e?.message ?? '네트워크를 확인하세요'),
+                onSettled: () => {
+                  setUndoingIds((prev) => { const t = new Set(prev); t.delete(done.id); return t; });
+                  void provisionsQ.refetch();
+                },
+              },
+            );
+          },
+        },
+      ],
+    );
+  };
+
+  // ④ 일괄 완료 — 순차 저장(서버 409 경합 방지) + 결과를 1회만 요약 (알림 폭탄 금지)
   const recordRemaining = (block: Block) => {
     const remaining = block.rows.filter((r) => !r.done);
     if (remaining.length === 0) return;
@@ -143,13 +193,41 @@ export default function WorkboardScreen() {
         { text: '취소', style: 'cancel' },
         {
           text: `${remaining.length}건 기록`,
-          onPress: () => {
-            // 순차 저장 — 실패한 건은 그대로 남아 다시 시도 가능 (가짜 성공 금지)
-            remaining.forEach((r) => record(r));
-          },
+          onPress: () => { void recordSequentially(remaining); },
         },
       ],
     );
+  };
+
+  const recordSequentially = async (rows: Row[]) => {
+    const failures: string[] = [];
+    for (const r of rows) {
+      setSavingIds((prev) => new Set(prev).add(r.schedule.id));
+      try {
+        await createProvisionAsync({
+          residentId: r.schedule.residentId,
+          serviceType: r.schedule.serviceType,
+          serviceDate: today,
+          startAt: nowIso(),
+          scheduleId: r.schedule.id,
+          staffId,
+          source: 'manual',
+          note: null,
+        });
+      } catch (e: any) {
+        failures.push(`${r.schedule.residentName ?? '(이름 없음)'}: ${e?.message ?? '저장 실패'}`);
+      } finally {
+        setSavingIds((prev) => { const t = new Set(prev); t.delete(r.schedule.id); return t; });
+      }
+    }
+    void provisionsQ.refetch();
+    // 실패를 조용히 삼키지 않는다 — 몇 건이 안 됐는지 한 번에 알려준다
+    if (failures.length > 0) {
+      RNAlert.alert(
+        `${rows.length}건 중 ${failures.length}건 실패`,
+        `${failures.slice(0, 5).join('\n')}${failures.length > 5 ? `\n… 외 ${failures.length - 5}건` : ''}\n\n실패한 분은 목록에 남아 있으니 다시 눌러 주세요.`,
+      );
+    }
   };
 
   const isLoading = schedulesQ.isLoading || provisionsQ.isLoading;
@@ -191,29 +269,35 @@ export default function WorkboardScreen() {
                 <Text style={[st.blockTime, isCurrent && { color: COLOR.primary }]}>{block.start}</Text>
                 {isCurrent && <Text style={st.nowChip}>지금</Text>}
                 <Text style={st.blockCount}>
-                  {block.rows.length - remaining}/{block.rows.length}명 완료
+                  {block.rows.filter((r) => r.done && !isExceptionRecord(r.done)).length}/{block.rows.length}명 완료
+                  {block.rows.some((r) => isExceptionRecord(r.done)) ? ` · 예외 ${block.rows.filter((r) => isExceptionRecord(r.done)).length}` : ''}
                 </Text>
               </View>
 
               {block.rows.map((row) => {
                 const saving = savingIds.has(row.schedule.id);
                 const done = row.done;
+                const isException = isExceptionRecord(done);
+                const undoing = !!done && undoingIds.has(done.id);
                 return (
                   <View key={row.schedule.id} style={st.rowWrap}>
                     <TouchableOpacity
-                      style={[st.row, done ? st.rowDone : null]}
-                      disabled={saving}
+                      style={[st.row, done ? (isException ? st.rowException : st.rowDone) : null]}
+                      disabled={saving || undoing}
                       onPress={() => (done
-                        ? RNAlert.alert('이미 기록됨', `${done.staffName ?? '다른 직원'}님이 기록했습니다${done.startAt ? ` (${done.startAt.slice(11, 16)})` : ''}.`)
+                        ? RNAlert.alert(
+                            isException ? '예외로 기록됨' : '이미 기록됨',
+                            `${done.staffName ?? '다른 직원'}님이 기록했습니다${done.startAt ? ` (${toKSTTime(done.startAt)})` : ''}.${done.note ? `\n\n${done.note}` : ''}`,
+                          )
                         : record(row))}
                     >
                       <MaterialCommunityIcons
-                        name={done ? 'check-circle' : 'checkbox-blank-circle-outline'}
+                        name={done ? (isException ? 'alert-circle' : 'check-circle') : 'checkbox-blank-circle-outline'}
                         size={30}
-                        color={done ? COLOR.success : COLOR.borderStrong}
+                        color={done ? (isException ? COLOR.warning : COLOR.success) : COLOR.borderStrong}
                       />
                       <View style={{ flex: 1 }}>
-                        <Text style={[st.rowName, done && st.rowNameDone]}>
+                        <Text style={[st.rowName, done && !isException && st.rowNameDone]}>
                           {row.schedule.residentName ?? '(이름 없음)'}
                         </Text>
                         <Text style={st.rowService}>
@@ -221,13 +305,22 @@ export default function WorkboardScreen() {
                           {row.schedule.expectedCount > 1 ? ` ×${row.schedule.expectedCount}회` : ''}
                           {done?.staffName ? ` · ${done.staffName}` : ''}
                         </Text>
+                        {/* ③ 예외는 완료와 구분해 보여준다 — 거부·일부인데 초록 완료로 보이면 안 된다 */}
+                        {isException && <Text style={st.exceptionTag}>예외 — {done?.note}</Text>}
                       </View>
-                      {saving && <ActivityIndicator size="small" color={COLOR.primary} />}
+                      {(saving || undoing) && <ActivityIndicator size="small" color={COLOR.primary} />}
                     </TouchableOpacity>
-                    {!done && (
+                    {!done ? (
                       <TouchableOpacity style={st.exceptionBtn} onPress={() => setExceptionFor(row)}>
                         <Text style={st.exceptionBtnText}>예외</Text>
                       </TouchableOpacity>
+                    ) : (
+                      // ① 되돌리기 — 내가 기록한 건만 (남의 기록은 서버 이전에 화면에서 막는다)
+                      (!staffId || !done.staffId || done.staffId === staffId) && (
+                        <TouchableOpacity style={st.undoBtn} disabled={undoing} onPress={() => undo(row)}>
+                          <Text style={st.undoBtnText}>되돌리기</Text>
+                        </TouchableOpacity>
+                      )
                     )}
                   </View>
                 );
@@ -288,6 +381,10 @@ const st = StyleSheet.create({
 
   block: { backgroundColor: COLOR.surface, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.lg, borderWidth: 1, borderColor: COLOR.border },
   blockCurrent: { borderColor: COLOR.primary, borderWidth: 2 },
+  rowException: { backgroundColor: COLOR.warningBg },
+  exceptionTag: { fontSize: FONT.caption, color: COLOR.warning, fontWeight: '600', marginTop: 2 },
+  undoBtn: { minHeight: TOUCH.min, minWidth: 96, paddingHorizontal: SPACE.md, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLOR.border, alignItems: 'center', justifyContent: 'center' },
+  undoBtnText: { fontSize: FONT.label, color: COLOR.textSub, fontWeight: '700' },
   blockHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, marginBottom: SPACE.md },
   blockTime: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.text },
   nowChip: { fontSize: FONT.caption, fontWeight: '700', color: '#fff', backgroundColor: COLOR.primary, paddingHorizontal: SPACE.sm, paddingVertical: 2, borderRadius: RADIUS.sm, overflow: 'hidden' },
