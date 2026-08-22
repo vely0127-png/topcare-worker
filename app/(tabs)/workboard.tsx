@@ -24,6 +24,12 @@
  *   - POST 응답 warning(개인계획 없음 등)은 반드시 사용자에게 보여준다.
  *   - 동시 체크 경합은 서버 409로 차단됨(d564e48) + 20초 갱신.
  *
+ * 2026-08-24 배설·목욕 상세(라운드 보강) — 웹 사용성 평가 2순위의 현장 쪽 대응
+ *   정상은 그대로 **행 탭 1번**(원칙 4). 적을 것이 있을 때만 [배변·이상]/[상세·이상] 시트에서
+ *   큰 버튼 하나로 고른다. 고른 값은 제공기록에 붙어 서버가 만드는 관찰기록(CareRecord)에
+ *   그대로 담긴다 — **기록을 하나 더 만들지 않는다**(원칙 7). 웹 배설관찰·목욕 목록과 기록지가
+ *   같은 값을 읽는다. 임상 판단(설사·혈변·발적)은 사람이 고른 것만 저장하고 추측하지 않는다.
+ *
  * 2026-08-23 워커앱 자체 점검 수정 4건 (웹 사용성 평가와 같은 눈으로 검사)
  *   ① 되돌리기 부재 → 내가 기록한 건만 [되돌리기](DELETE). 잘못 눌러도 관리자 전화 불필요.
  *      useDeleteServiceProvision 훅은 있었는데 이 화면이 호출하지 않는 고아 상태였다(웹과 같은 패턴).
@@ -46,15 +52,61 @@ import { serviceTypeLabel } from '@/lib/care/service-rules';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
-/** 예외 선택지 — 큰 버튼 3종 + 메모는 다음 단계(음성 입력) 예정 */
-const EXCEPTIONS = [
-  { key: 'refused', label: '거부하심', note: '어르신이 거부하셔서 제공하지 못함' },
-  { key: 'partial', label: '절반만·일부만', note: '일부만 제공함' },
-  { key: 'issue', label: '이상 발견', note: '제공 중 이상 소견 — 간호 확인 필요' },
-] as const;
+/**
+ * 상세 시트 선택지 — 큰 버튼 하나로 끝난다(음성 메모는 다음 단계).
+ * exception=true 는 '완료'가 아니라 주황 예외로 표시된다.
+ * detail 은 서버가 만드는 관찰기록(CareRecord)에 담기는 값 —
+ * 용어는 웹 배설관찰·목욕 입력 화면과 동일하게 맞췄다(공단 서식 용어 일관성).
+ */
+type DetailOption = {
+  key: string;
+  label: string;
+  note: string;
+  exception: boolean;
+  detail?: Record<string, string>;
+};
+
+const COMMON_OPTIONS: DetailOption[] = [
+  { key: 'refused', label: '거부하심', note: '어르신이 거부하셔서 제공하지 못함', exception: true },
+  { key: 'partial', label: '절반만·일부만', note: '일부만 제공함', exception: true },
+  { key: 'issue', label: '이상 발견', note: '제공 중 이상 소견 — 간호 확인 필요', exception: true },
+];
+
+const DETAIL_CONFIG: Record<string, { button: string; title: string; options: DetailOption[] }> = {
+  defecation: {
+    button: '배변·이상',
+    title: '무엇을 확인했나요?',
+    options: [
+      { key: 'stool', label: '대변 있었음', note: '대변 확인', exception: false, detail: { type: '대변', amount: '보통', condition: '정상', skin: '정상' } },
+      { key: 'diarrhea', label: '설사', note: '설사 — 간호 확인 필요', exception: true, detail: { type: '대변', condition: '설사', skin: '정상' } },
+      { key: 'constipation', label: '변비 · 안 나옴', note: '배변 없음 — 변비 경향', exception: true, detail: { type: '배설없음', condition: '변비' } },
+      { key: 'blood', label: '혈변', note: '혈변 — 간호 즉시 확인 필요', exception: true, detail: { type: '대변', condition: '혈변' } },
+      { key: 'skin', label: '피부 발적 · 짓무름', note: '피부 발적·짓무름 — 간호 확인 필요', exception: true, detail: { skin: '발적' } },
+      COMMON_OPTIONS[0], COMMON_OPTIONS[1],
+    ],
+  },
+  bathing: {
+    button: '상세·이상',
+    title: '목욕은 어땠나요?',
+    options: [
+      { key: 'partial_bath', label: '부분목욕만', note: '부분목욕으로 제공', exception: false, detail: { bathType: '부분목욕', assistance: '부분보조', skin: '정상' } },
+      { key: 'bed_bath', label: '침상목욕', note: '침상목욕으로 제공', exception: false, detail: { bathType: '침상목욕', assistance: '완전보조', skin: '정상' } },
+      { key: 'skin', label: '피부 발적 · 상처 발견', note: '피부 발적·상처 발견 — 간호 확인 필요', exception: true, detail: { bathType: '전신목욕', skin: '발적' } },
+      ...COMMON_OPTIONS,
+    ],
+  },
+};
+
+const optionsFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.options ?? COMMON_OPTIONS;
+const sheetTitleFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.title ?? '무슨 일이 있었나요?';
+const sheetButtonFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.button ?? '예외';
 
 /** 예외로 기록된 건인가 — note가 예외 문구와 일치하면 예외(완료와 시각적으로 구분) */
-const EXCEPTION_NOTES: string[] = EXCEPTIONS.map((e) => e.note);
+const EXCEPTION_NOTES: string[] = Array.from(new Set(
+  [...COMMON_OPTIONS, ...Object.values(DETAIL_CONFIG).flatMap((c) => c.options)]
+    .filter((o) => o.exception)
+    .map((o) => o.note),
+));
 const isExceptionRecord = (p: ServiceProvision | null) =>
   !!p?.note && EXCEPTION_NOTES.includes(p.note);
 
@@ -116,7 +168,7 @@ export default function WorkboardScreen() {
     return `${today}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:00+09:00`;
   };
 
-  const record = (row: Row, note?: string, onDone?: () => void) => {
+  const record = (row: Row, note?: string, detail?: Record<string, string>, onDone?: () => void) => {
     if (row.done) {
       RNAlert.alert('이미 기록됨', `${row.done.staffName ?? '다른 직원'}님이 이미 기록했습니다.`);
       return;
@@ -132,6 +184,8 @@ export default function WorkboardScreen() {
         staffId,
         source: 'manual',
         note: note ?? null,
+        // 관찰 세부 — 서버가 만드는 CareRecord 에 담긴다(기록 1건 원칙 유지)
+        ...(detail ? { detail } : {}),
       },
       {
         onSuccess: (created) => {
@@ -312,7 +366,7 @@ export default function WorkboardScreen() {
                     </TouchableOpacity>
                     {!done ? (
                       <TouchableOpacity style={st.exceptionBtn} onPress={() => setExceptionFor(row)}>
-                        <Text style={st.exceptionBtnText}>예외</Text>
+                        <Text style={st.exceptionBtnText}>{sheetButtonFor(row.schedule.serviceType)}</Text>
                       </TouchableOpacity>
                     ) : (
                       // ① 되돌리기 — 내가 기록한 건만 (남의 기록은 서버 이전에 화면에서 막는다)
@@ -343,18 +397,18 @@ export default function WorkboardScreen() {
             <Text style={st.modalTitle}>
               {exceptionFor?.schedule.residentName} — {exceptionFor ? serviceTypeLabel(exceptionFor.schedule.serviceType) : ''}
             </Text>
-            <Text style={st.modalSub}>무슨 일이 있었나요?</Text>
-            {EXCEPTIONS.map((ex) => (
+            <Text style={st.modalSub}>{exceptionFor ? sheetTitleFor(exceptionFor.schedule.serviceType) : '무슨 일이 있었나요?'}</Text>
+            {(exceptionFor ? optionsFor(exceptionFor.schedule.serviceType) : COMMON_OPTIONS).map((ex) => (
               <TouchableOpacity
                 key={ex.key}
-                style={st.modalOption}
+                style={[st.modalOption, !ex.exception && st.modalOptionNormal]}
                 onPress={() => {
                   const row = exceptionFor;
                   setExceptionFor(null);
-                  if (row) record(row, ex.note);
+                  if (row) record(row, ex.note, ex.detail);
                 }}
               >
-                <Text style={st.modalOptionText}>{ex.label}</Text>
+                <Text style={[st.modalOptionText, !ex.exception && st.modalOptionTextNormal]}>{ex.label}</Text>
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={st.modalCancel} onPress={() => setExceptionFor(null)}>
@@ -396,7 +450,9 @@ const st = StyleSheet.create({
   rowName: { fontSize: FONT.body, fontWeight: '700', color: COLOR.text },
   rowNameDone: { color: COLOR.textSub },
   rowService: { fontSize: FONT.caption, color: COLOR.textMuted, marginTop: 2 },
-  exceptionBtn: { minWidth: 64, minHeight: TOUCH.min, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.caution, alignItems: 'center', justifyContent: 'center', backgroundColor: COLOR.surface },
+  modalOptionNormal: { borderColor: COLOR.success },
+  modalOptionTextNormal: { color: COLOR.success },
+  exceptionBtn: { minWidth: 78, minHeight: TOUCH.min, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.caution, alignItems: 'center', justifyContent: 'center', backgroundColor: COLOR.surface },
   exceptionBtnText: { fontSize: FONT.label, fontWeight: '700', color: COLOR.caution },
 
   allDoneBtn: { marginTop: SPACE.sm, minHeight: TOUCH.large, borderRadius: RADIUS.md, backgroundColor: COLOR.primary, alignItems: 'center', justifyContent: 'center' },

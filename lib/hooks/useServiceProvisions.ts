@@ -84,6 +84,12 @@ export interface CreateServiceProvisionVars {
   scheduleId?: string | null;
   source?: ProvisionSource;
   note?: string | null;
+  /**
+   * 관찰 세부(배설·목욕) — 서버가 자동 생성하는 CareRecord 에 담긴다.
+   * 별도 기록을 하나 더 만들지 않으므로 같은 사실이 두 줄로 남지 않는다.
+   * 허용 키: type·amount·condition·skin·note·bathType·assistance (서버 화이트리스트)
+   */
+  detail?: Record<string, string>;
 }
 
 export function useCreateServiceProvision() {
