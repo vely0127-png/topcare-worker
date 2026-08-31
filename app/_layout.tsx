@@ -15,6 +15,7 @@ import { useAuthStore } from '@/lib/auth/auth-store';
 import { homeRouteForRole } from '@/lib/auth/roles';
 import { initPushNotifications, unregisterPushToken } from '@/lib/notifications';
 import { BeaconProvider } from '@/lib/beacon/provider';
+import { WebQaBanner } from '@/components/WebQaBanner';
 
 function useAuthGuard() {
   const status = useAuthStore((s) => s.status);
@@ -108,6 +109,8 @@ export default function RootLayout() {
       <PaperProvider>
         <SafeAreaProvider>
           <StatusBar style="light" />
+          {/* 웹 QA 빌드에서만 보이는 안내 (실기기에선 렌더링 안 함) */}
+          <WebQaBanner />
           {/* 비콘 스캐너는 앱 전체에서 하나. 로그인 상태 + 포그라운드면 자동으로 돈다
               (2026-08-06 대표 지시: "스캔은 앱 사용시 기본 설정") */}
           <BeaconProvider>

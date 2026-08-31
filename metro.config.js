@@ -17,4 +17,26 @@ config.watchFolders = fs.existsSync(sharedDir) ? [sharedDir] : [];
 // 모듈 해석은 프로젝트 node_modules 우선.
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, 'node_modules')];
 
+// ── 선택적(optional) 의존 스텁 (2026-08-06, 웹 export 시 발견) ──
+// @supabase/supabase-js 가 @opentelemetry/api 를 `import(...).catch(() => null)` 로
+// 부른다. 없어도 무해한 코드지만 Metro 는 정적으로 해석하려다 번들을 실패시킨다:
+//   "Unable to resolve module @opentelemetry/api from @supabase/supabase-js"
+// 실제로 설치할 이유가 없으므로 빈 모듈로 해석시킨다(네이티브·웹 공통).
+const OPTIONAL_STUBS = {
+  '@opentelemetry/api': path.resolve(projectRoot, 'stubs', 'empty.js'),
+  // react-native-web 에는 PermissionsAndroid 가 없다. scanner.ts 가 정적 import 하지만
+  // 런타임에는 `Platform.OS !== 'android'` 에서 먼저 return 하므로 웹에서 절대 실행되지
+  // 않는다 → 해석만 통과시키면 된다(웹 QA 빌드용).
+  'react-native-web/dist/exports/PermissionsAndroid': path.resolve(projectRoot, 'stubs', 'empty.js'),
+};
+
+const defaultResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const stub = OPTIONAL_STUBS[moduleName];
+  if (stub) return { type: 'sourceFile', filePath: stub };
+  return defaultResolveRequest
+    ? defaultResolveRequest(context, moduleName, platform)
+    : context.resolveRequest(context, moduleName, platform);
+};
+
 module.exports = config;

@@ -5,13 +5,28 @@
  * 웹/SSR 환경(예: expo-web)에서는 SecureStore 가 없으므로 메모리 폴백을 둔다.
  */
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { STORAGE_KEYS } from '../config';
 import type { AuthSession } from './types';
 
 const memoryStore = new Map<string, string>();
 const secureStoreAvailable = typeof SecureStore.getItemAsync === 'function';
 
+/**
+ * 웹(QA용 expo-web 빌드)에서는 SecureStore 가 없다.
+ * 메모리만 쓰면 새로고침할 때마다 로그아웃돼서 QA가 불가능하므로 localStorage 를 쓴다.
+ * ⚠ 실기기(Android/iOS)는 그대로 SecureStore(Keychain/Keystore) — 웹만 예외다.
+ *   웹 QA 빌드는 사내 테스트용이며 실제 요양원 단말에 배포하지 않는다.
+ */
+const webStore =
+  Platform.OS === 'web' && typeof globalThis !== 'undefined' && (globalThis as any).localStorage
+    ? ((globalThis as any).localStorage as Storage)
+    : null;
+
 async function getItem(key: string): Promise<string | null> {
+  if (webStore) {
+    try { return webStore.getItem(key); } catch { return memoryStore.get(key) ?? null; }
+  }
   if (!secureStoreAvailable) return memoryStore.get(key) ?? null;
   try {
     return await SecureStore.getItemAsync(key);
@@ -22,6 +37,10 @@ async function getItem(key: string): Promise<string | null> {
 
 async function setItem(key: string, value: string): Promise<void> {
   memoryStore.set(key, value);
+  if (webStore) {
+    try { webStore.setItem(key, value); } catch { /* 메모리에는 이미 저장됨 */ }
+    return;
+  }
   if (!secureStoreAvailable) return;
   try {
     await SecureStore.setItemAsync(key, value);
@@ -32,6 +51,10 @@ async function setItem(key: string, value: string): Promise<void> {
 
 async function removeItem(key: string): Promise<void> {
   memoryStore.delete(key);
+  if (webStore) {
+    try { webStore.removeItem(key); } catch { /* noop */ }
+    return;
+  }
   if (!secureStoreAvailable) return;
   try {
     await SecureStore.deleteItemAsync(key);

@@ -75,7 +75,8 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": false
+      "typedRoutes": false,
+      "baseUrl": "/worker"
     },
     "extra": {
       "router": {
