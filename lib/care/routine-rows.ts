@@ -87,9 +87,15 @@ export function buildRoutineSchedules(args: {
 /**
  * 가상행에 해당하는 오늘의 제공기록 찾기.
  *
- * 실계획은 scheduleId 로 붙지만 가상행은 서버에 id 가 없다. 그래서
- *   ① note(일과 내용) 일치 → ② 유형 + 계획 시각 일치  순으로 찾는다.
- * ②가 필요한 이유: 예외 기록(거부하심 등)은 note 가 예외 문구로 덮여 ①이 깨진다.
+ * 실계획은 scheduleId 로 붙지만 가상행은 서버에 id 가 없다. 그래서 아래 순서로 찾는다.
+ *   ① note(일과 내용) + 계획 시각 일치
+ *   ② note 일치 (시각 정보가 없는 옛 기록 대비)
+ *   ③ 유형 + 계획 시각 일치
+ *
+ * ⚠ ①이 ②보다 먼저인 이유: 같은 문구의 일과가 하루에 두 번 있으면(예: '체위변경'이
+ *   오전·오후에 각각) note 만으로 찾으면 **먼저 나온 기록이 뒤 시각 행에도 완료로 붙는다.**
+ *   하지도 않은 일이 완료로 보이는 건 이 프로젝트에서 가장 하면 안 되는 종류의 버그다.
+ * ⚠ ③이 필요한 이유: 예외 기록(거부하심 등)은 note 가 예외 문구로 덮여 ①②가 깨진다.
  */
 export function findVirtualProvision(
   schedule: ServiceSchedule,
@@ -97,14 +103,14 @@ export function findVirtualProvision(
   kstHHMM: (iso: string | null) => string | null,
 ): ServiceProvision | null {
   const mine = provisions.filter((p) => !p.scheduleId && p.residentId === schedule.residentId);
+  const atPlanned = (p: ServiceProvision) =>
+    schedule.plannedStart != null && kstHHMM(p.startAt ?? null) === schedule.plannedStart;
+  const noteMatches = (p: ServiceProvision) => p.note != null && p.note === schedule.note;
+
   return (
-    mine.find((p) => p.note != null && p.note === schedule.note)
-    ?? mine.find(
-      (p) =>
-        p.serviceType === schedule.serviceType
-        && schedule.plannedStart != null
-        && kstHHMM(p.startAt ?? null) === schedule.plannedStart,
-    )
+    mine.find((p) => noteMatches(p) && atPlanned(p))
+    ?? mine.find((p) => noteMatches(p) && p.startAt == null)
+    ?? mine.find((p) => p.serviceType === schedule.serviceType && atPlanned(p))
     ?? null
   );
 }

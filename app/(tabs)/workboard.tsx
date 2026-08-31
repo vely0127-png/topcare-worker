@@ -190,6 +190,8 @@ export default function WorkboardScreen() {
     const d = new Date(Date.now() + 9 * 3600_000);
     return `${today}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:00+09:00`;
   };
+  /** 계획 시각(HH:MM) → 오늘 KST ISO. 가상행 매칭 키다 — 없으면 현재 시각으로 떨어진다. */
+  const plannedIso = (hhmm: string | null) => (hhmm ? `${today}T${hhmm}:00+09:00` : nowIso());
 
   const record = (row: Row, note?: string, detail?: Record<string, string>, onDone?: () => void) => {
     if (row.done) {
@@ -205,7 +207,11 @@ export default function WorkboardScreen() {
         residentId: row.schedule.residentId,
         serviceType: row.schedule.serviceType,
         serviceDate: today,
-        startAt: nowIso(),
+        // ⚠ 실계획은 scheduleId 로 되찾으므로 '기록한 실제 시각'을 남긴다(기존 동작).
+        //   가상행은 되찾을 id 가 없어 (note + 계획 시각)으로 매칭한다 — 그래서 계획 시각을 넣는다.
+        //   웹 ServiceTodoList 도 같은 규약이다(H8: 슬롯 판정은 계획 시각 기준).
+        //   여기에 실제 시각을 넣으면 체크해도 완료로 안 보인다 — 실제로 밟을 뻔한 함정.
+        startAt: virtual ? plannedIso(row.schedule.plannedStart) : nowIso(),
         ...(virtual ? {} : { scheduleId: row.schedule.id }),
         staffId,
         source: 'manual',
@@ -289,7 +295,7 @@ export default function WorkboardScreen() {
           residentId: r.schedule.residentId,
           serviceType: r.schedule.serviceType,
           serviceDate: today,
-          startAt: nowIso(),
+          startAt: virtual ? plannedIso(r.schedule.plannedStart) : nowIso(), // record()와 동일 규약
           ...(virtual ? {} : { scheduleId: r.schedule.id }),
           staffId,
           source: 'manual',
