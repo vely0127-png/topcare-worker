@@ -4,8 +4,9 @@
 import { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, ActivityIndicator, RefreshControl,
+  TextInput, ActivityIndicator, RefreshControl
 } from 'react-native';
+import { Alert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useTodos, useTodoPatch, toDisplayStatus, toApiStatus, deriveSource,

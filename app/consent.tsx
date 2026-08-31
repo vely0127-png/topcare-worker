@@ -4,7 +4,8 @@
  * (_layout useAuthGuard). 문안은 서버(GET /api/consent)가 정본 — 버전 개정 시 자동 재동의.
  */
 import { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator} from 'react-native';
+import { Alert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';

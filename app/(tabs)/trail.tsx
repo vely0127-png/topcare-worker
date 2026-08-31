@@ -21,8 +21,9 @@
 import { useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Modal, Alert as RNAlert,
+  ActivityIndicator, RefreshControl, Modal
 } from 'react-native';
+import { Alert as RNAlert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 

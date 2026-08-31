@@ -4,8 +4,9 @@
 import { useState } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
-  StyleSheet, Alert, ActivityIndicator,
+  StyleSheet, ActivityIndicator
 } from 'react-native';
+import { Alert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useResidents } from '../../lib/hooks/useResidents';
 import { useCareRecordCreate } from '../../lib/hooks/useCareRecords';

@@ -5,7 +5,8 @@
  * 2026-08-05: 행 구성·체크 로직을 lib/hooks/useTodayTasks로 추출 —
  * 근접 탭(비콘 현재 위치 업무)과 공유. 규약(웹 ServiceTodoList 미러)은 훅 참조.
  */
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { Alert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';

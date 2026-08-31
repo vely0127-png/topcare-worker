@@ -22,8 +22,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Alert as RNAlert,
+  ActivityIndicator, KeyboardAvoidingView, Platform
 } from 'react-native';
+import { Alert as RNAlert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
