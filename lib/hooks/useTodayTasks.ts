@@ -6,7 +6,13 @@
  *  - 체크 = POST service-provisions (startAt=계획 시각 — H8), 해제 = DELETE
  *  - 서버 경고(C5·H4)는 호출측에 onWarning으로 전달해 반드시 노출
  *
- * 사용처: (tabs)/index.tsx(전체 목록) + (tabs)/proximity.tsx(비콘 현재 위치 업무).
+ * ⚠ 사용처 주의 (2026-08-31 정정)
+ *   원래 주석은 사용처를 "(tabs)/index.tsx + (tabs)/proximity.tsx" 로 적어두었지만,
+ *   탭바 제거 UX 개편(2026-08-06) 이후 **어떤 화면도 이 훅을 호출하지 않는다.**
+ *   그 사이 워커앱에서 서비스 시간표를 보여주는 화면은 [공동 작업판] 하나뿐이었는데
+ *   그 화면은 시설 일과표를 읽지 않아, 웹에는 610건이 뜨는데 앱만 비어 있는 사고가 났다.
+ *   일과표 병합 로직은 lib/care/routine-rows 로 뽑아 공동 작업판과 공유한다 —
+ *   이 훅을 되살리든 지우든, **병합 구현을 여기에 다시 복사하지 말 것.**
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useServiceSchedules } from './useServiceSchedules';
@@ -16,7 +22,7 @@ import {
 } from './useServiceProvisions';
 import { useResidents } from './useResidents';
 import { useApiQuery } from './useApi';
-import { PERSONAL_TYPES, inferTypeFromActivity } from '../care/service-rules';
+import { buildRoutineSchedules } from '../care/routine-rows';
 
 // ── KST 헬퍼 ──
 // 정본은 lib/utils/date. 여기서는 기존 사용처 호환을 위해 재수출만 한다(이원화 금지).
@@ -123,29 +129,24 @@ export function useTodayTasks(): UseTodayTasksResult {
       }
     }
 
-    // 2) 시설 일과표 × 입소자 — 개인화 유형은 개인 계획 보유자에게만 (기저귀 비사용자 제외 규칙)
-    const realKeys = new Set(real.map((s) => `${s.residentId}|${s.plannedStart}|${s.note ?? ''}`));
-    const personalByResident = new Map<string, Set<string>>();
-    for (const s of schedules) {
-      if (!personalByResident.has(s.residentId)) personalByResident.set(s.residentId, new Set());
-      personalByResident.get(s.residentId)!.add(s.serviceType);
-    }
-    for (const item of routine) {
-      const itemType = inferTypeFromActivity(item.activity);
-      for (const r of residents) {
-        if (PERSONAL_TYPES.has(itemType) && !personalByResident.get(r.id)?.has(itemType)) continue;
-        if (realKeys.has(`${r.id}|${item.time}|${item.activity}`)) continue;
-        out.push({
-          key: `v|${r.id}|${item.time}|${item.activity}`,
-          residentId: r.id,
-          residentName: r.name,
-          serviceType: itemType,
-          plannedStart: item.time,
-          note: item.activity,
-          scheduleId: null,
-          dayLabel: '일과표',
-        });
-      }
+    // 2) 시설 일과표 × 입소자 — 정본은 lib/care/routine-rows (공동 작업판과 같은 구현을 쓴다).
+    //    2026-08-31: 여기와 공동 작업판이 각자 병합하다가 앱만 비어 보이는 사고가 났다. 복사 금지.
+    for (const v of buildRoutineSchedules({
+      routine,
+      residents: residents.map((r) => ({ id: r.id, name: r.name })),
+      realSchedules: real,
+      allSchedules: schedules,
+    })) {
+      out.push({
+        key: v.id, // routine-rows 가 만드는 'v|<residentId>|<time>|<activity>'
+        residentId: v.residentId,
+        residentName: v.residentName ?? '-',
+        serviceType: v.serviceType,
+        plannedStart: v.plannedStart,
+        note: v.note,
+        scheduleId: null,
+        dayLabel: '일과표',
+      });
     }
 
     return out.sort((a, b) =>

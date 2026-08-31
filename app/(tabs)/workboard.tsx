@@ -47,8 +47,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useServiceSchedules, hhmmToMin, type ServiceSchedule } from '@/lib/hooks/useServiceSchedules';
 import { useServiceProvisions, useCreateServiceProvision, useDeleteServiceProvision, type ServiceProvision } from '@/lib/hooks/useServiceProvisions';
+import { useResidents } from '@/lib/hooks/useResidents';
+import { useApiQuery } from '@/lib/hooks/useApi';
 import { useSession } from '@/lib/hooks/useAuth';
 import { serviceTypeLabel } from '@/lib/care/service-rules';
+import { buildRoutineSchedules, findVirtualProvision, isVirtualSchedule } from '@/lib/care/routine-rows';
+import { kstHHMM } from '@/lib/hooks/useTodayTasks';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -126,6 +130,11 @@ export default function WorkboardScreen() {
 
   const schedulesQ = useServiceSchedules({ isActive: true });
   const provisionsQ = useServiceProvisions({ date: today, limit: 300 });
+  // 시설 일과표 × 입소자 — 웹 [서비스 시간표]와 같은 목록을 보기 위한 원천 (2026-08-31)
+  const residentsQ = useResidents({ status: 'admitted', limit: 200 });
+  const facilityQ = useApiQuery<{ scheduleConfig?: { dailyRoutine?: { time: string; activity: string }[] } | null }>(
+    ['facility'], '/api/settings/facility', { query: { staleTime: 5 * 60_000 } },
+  );
   const { mutate: createProvision, isPending: isSaving , mutateAsync: createProvisionAsync } = useCreateServiceProvision();
 
   const [exceptionFor, setExceptionFor] = useState<Row | null>(null);
@@ -133,9 +142,19 @@ export default function WorkboardScreen() {
 
   // ── 오늘의 작업판: 계획(오늘 요일+매일) × 기록 매칭 → 시각 블록 ──
   const blocks: Block[] = useMemo(() => {
-    const schedules = (schedulesQ.data ?? []).filter(
+    const all = schedulesQ.data ?? [];
+    const real = all.filter(
       (s) => s.isActive && s.plannedStart && (s.dayOfWeek === null || s.dayOfWeek === todayDow),
     );
+    // 시설 일과표 가상행을 실계획 뒤에 붙인다 — 웹 ServiceTodoList 와 같은 규약(정본: lib/care/routine-rows)
+    const virtual = buildRoutineSchedules({
+      routine: facilityQ.data?.scheduleConfig?.dailyRoutine ?? [],
+      residents: (residentsQ.data?.items ?? []).map((r: any) => ({ id: r.id, name: r.name })),
+      realSchedules: real,
+      allSchedules: all,
+    });
+    const schedules = [...real, ...virtual];
+
     const provisions = provisionsQ.data?.items ?? [];
     const byScheduleId = new Map<string, ServiceProvision>();
     for (const p of provisions) {
@@ -144,7 +163,11 @@ export default function WorkboardScreen() {
     const byStart = new Map<string, Row[]>();
     for (const s of schedules) {
       const start = s.plannedStart as string;
-      const row: Row = { schedule: s, done: byScheduleId.get(s.id) ?? null };
+      // 가상행은 서버에 id 가 없다 — note/시각으로 찾는다
+      const done = isVirtualSchedule(s)
+        ? findVirtualProvision(s, provisions, kstHHMM)
+        : byScheduleId.get(s.id) ?? null;
+      const row: Row = { schedule: s, done };
       byStart.set(start, [...(byStart.get(start) ?? []), row]);
     }
     return [...byStart.entries()]
@@ -153,7 +176,7 @@ export default function WorkboardScreen() {
         start,
         rows: rows.sort((a, b) => (a.schedule.residentName ?? '').localeCompare(b.schedule.residentName ?? '', 'ko')),
       }));
-  }, [schedulesQ.data, provisionsQ.data, todayDow]);
+  }, [schedulesQ.data, provisionsQ.data, residentsQ.data, facilityQ.data, todayDow]);
 
   // "지금" 블록 = 시작 시각이 지났고 다음 블록은 아직인 것 (없으면 첫 미래 블록)
   const nowMin = (() => { const d = new Date(Date.now() + 9 * 3600_000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
@@ -174,16 +197,19 @@ export default function WorkboardScreen() {
       return;
     }
     setSavingIds((prev) => new Set(prev).add(row.schedule.id));
+    // 가상행(시설 일과표 파생)은 서버에 계획 id 가 없다 — scheduleId 대신 일과 내용을 note 로 보낸다.
+    // 없는 id 를 보내면 서버가 404/무결성 오류를 내거나, 더 나쁘게는 남의 계획에 붙는다.
+    const virtual = isVirtualSchedule(row.schedule);
     createProvision(
       {
         residentId: row.schedule.residentId,
         serviceType: row.schedule.serviceType,
         serviceDate: today,
         startAt: nowIso(),
-        scheduleId: row.schedule.id,
+        ...(virtual ? {} : { scheduleId: row.schedule.id }),
         staffId,
         source: 'manual',
-        note: note ?? null,
+        note: note ?? (virtual ? row.schedule.note : null),
         // 관찰 세부 — 서버가 만드는 CareRecord 에 담긴다(기록 1건 원칙 유지)
         ...(detail ? { detail } : {}),
       },
@@ -258,15 +284,16 @@ export default function WorkboardScreen() {
     for (const r of rows) {
       setSavingIds((prev) => new Set(prev).add(r.schedule.id));
       try {
+        const virtual = isVirtualSchedule(r.schedule); // 가상행은 scheduleId 대신 note (record()와 동일 규약)
         await createProvisionAsync({
           residentId: r.schedule.residentId,
           serviceType: r.schedule.serviceType,
           serviceDate: today,
           startAt: nowIso(),
-          scheduleId: r.schedule.id,
+          ...(virtual ? {} : { scheduleId: r.schedule.id }),
           staffId,
           source: 'manual',
-          note: null,
+          note: virtual ? r.schedule.note : null,
         });
       } catch (e: any) {
         failures.push(`${r.schedule.residentName ?? '(이름 없음)'}: ${e?.message ?? '저장 실패'}`);
@@ -284,19 +311,24 @@ export default function WorkboardScreen() {
     }
   };
 
-  const isLoading = schedulesQ.isLoading || provisionsQ.isLoading;
-  const isError = schedulesQ.isError;
+  const isLoading = schedulesQ.isLoading || provisionsQ.isLoading || residentsQ.isLoading || facilityQ.isLoading;
+  // 일과표·입소자 조회가 실패하면 판이 조용히 비어 보인다 — 빈 판으로 위장하지 않는다(정직성 원칙)
+  const isError = schedulesQ.isError || residentsQ.isError || facilityQ.isError;
+  const refetchAll = () => {
+    void schedulesQ.refetch(); void provisionsQ.refetch();
+    void residentsQ.refetch(); void facilityQ.refetch();
+  };
 
   return (
     <SafeAreaView style={st.safe} edges={['bottom']}>
       <ScrollView
         contentContainerStyle={st.scroll}
-        refreshControl={<RefreshControl refreshing={!!provisionsQ.isRefetching} onRefresh={() => { void schedulesQ.refetch(); void provisionsQ.refetch(); }} />}
+        refreshControl={<RefreshControl refreshing={!!provisionsQ.isRefetching} onRefresh={refetchAll} />}
       >
         {isError && (
           <View style={st.errorBanner}>
             <Text style={st.errorText}>작업판을 불러오지 못했습니다 — 아래 내용은 실제가 아닐 수 있습니다.</Text>
-            <TouchableOpacity style={st.retryBtn} onPress={() => { void schedulesQ.refetch(); }}>
+            <TouchableOpacity style={st.retryBtn} onPress={refetchAll}>
               <Text style={st.retryText}>다시 시도</Text>
             </TouchableOpacity>
           </View>
@@ -310,7 +342,7 @@ export default function WorkboardScreen() {
           <View style={st.center}>
             <MaterialCommunityIcons name="clipboard-text-outline" size={48} color={COLOR.textFaint} />
             <Text style={st.emptyText}>오늘 계획된 서비스가 없습니다</Text>
-            <Text style={st.emptyHint}>웹 관리자에서 기초평가 {'>'} 서비스 적용 또는 목욕 배정을 하면 여기에 나타납니다</Text>
+            <Text style={st.emptyHint}>웹 관리자에서 [기본 설정 시간표]에 일과를 저장하거나, 기초평가 {'>'} 서비스 적용·목욕 배정을 하면 여기에 나타납니다</Text>
           </View>
         )}
 
