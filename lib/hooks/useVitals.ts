@@ -83,6 +83,10 @@ export function useVitalsSave() {
       onSuccess: () => {
         void qc.invalidateQueries({ queryKey: ['vitals'] });
         void qc.invalidateQueries({ queryKey: ['alerts'] });
+        // 2026-08-31 대표 지시: 수치를 넣으면 공동 작업판의 '바이탈 측정' 행이 바로 완료로 보여야 한다.
+        // 서버가 바이탈 저장 시 vital 제공기록을 만들어 주므로(웹 /api/vitals),
+        // 여기서 제공기록 캐시를 무효화하지 않으면 20초 폴링 전까지 미완료로 남는다.
+        void qc.invalidateQueries({ queryKey: ['service-provisions'] });
       },
     },
   );
