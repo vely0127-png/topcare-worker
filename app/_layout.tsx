@@ -16,6 +16,11 @@ import { homeRouteForRole } from '@/lib/auth/roles';
 import { initPushNotifications, unregisterPushToken } from '@/lib/notifications';
 import { BeaconProvider } from '@/lib/beacon/provider';
 import { WebQaBanner } from '@/components/WebQaBanner';
+import { keepBaseUrl } from '@/lib/ui/keep-base-url';
+
+// 웹 주소창의 /worker 접두사 유지 — expo-router 가 부팅 때 떼어버려서
+// 새로고침하면 404 가 났다. 네이티브에서는 no-op. 모듈 로드 시 1회.
+keepBaseUrl();
 
 function useAuthGuard() {
   const status = useAuthStore((s) => s.status);
