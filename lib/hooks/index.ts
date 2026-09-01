@@ -9,3 +9,4 @@ export * from './useBeaconProximity';
 export * from './useServiceProvisions';
 export * from './useServiceSchedules';
 export * from './useBeaconServiceLog';
+export * from './useObservationCards';
