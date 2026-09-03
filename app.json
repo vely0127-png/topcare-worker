@@ -3,7 +3,7 @@
     "name": "TopCare 종사자",
     "slug": "topcare-worker",
     "scheme": "topcare-worker",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
@@ -19,7 +19,7 @@
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "근무 출퇴근 자동 인증을 위해 시설에 설치된 BLE 비콘 신호를 감지합니다.",
         "NSBluetoothPeripheralUsageDescription": "근무 출퇴근 자동 인증을 위해 시설에 설치된 BLE 비콘 신호를 감지합니다.",
-        "NSLocationWhenInUseUsageDescription": "BLE 비콘 근접 감지를 위해 기기 위치 권한이 필요합니다.",
+        "NSLocationWhenInUseUsageDescription": "출퇴근 확인 시 1회 위치를 확인합니다. BLE 비콘 근접 감지에도 기기 위치 권한이 필요합니다. 상시 위치 추적은 하지 않습니다.",
         "UIBackgroundModes": [
           "bluetooth-central"
         ]
@@ -49,6 +49,15 @@
       "expo-secure-store",
       "expo-dev-client",
       "./plugins/withBleScanLocationFix",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "출퇴근 확인 시 1회 위치를 확인합니다. 상시 위치 추적은 하지 않습니다.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
       [
         "expo-barcode-scanner",
         {

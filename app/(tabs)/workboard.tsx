@@ -102,6 +102,26 @@ const DETAIL_CONFIG: Record<string, { button: string; title: string; options: De
   },
 };
 
+/**
+ * 라운드 배변 유무 — 정상 1탭 뒤에 붙는 **1탭 추가** 시트 (2026-09-03 vc9 / QA P2 제안)
+ *
+ * 왜: 배변 케어를 정상 1탭으로 완료하면 관찰기록의 유형이 '서비스 제공'으로만 남았다.
+ *     기저귀를 갈았다는 사실은 남는데 **무엇을 봤는지**가 안 남아, 웹 배설관찰 목록·기록지에서
+ *     "기록은 있는데 내용이 없는 줄"이 됐다.
+ * 무엇을: 4버튼 중 하나만 탭하면 그 값이 detail.type 으로 붙어 저장된다(기록 1건 원칙 유지 —
+ *     기존 예외 시트와 같은 detail 경로. 서버 화이트리스트 키는 type).
+ * 강요 금지: [건너뛰기]는 detail 없이 저장 = 기존 동작 그대로. 양·성상·피부는 여기서 묻지 않는다
+ *     (안 본 것을 '정상'으로 창작하지 않는다 — 적을 것이 있으면 [배변·이상] 시트로).
+ * 용어는 웹 배설 라운드(BulkCareRoundModal marks)와 같은 값을 쓴다.
+ */
+type BowelOption = { key: string; label: string; type: string };
+const BOWEL_OPTIONS: BowelOption[] = [
+  { key: 'urine', label: '소변', type: '소변' },
+  { key: 'stool', label: '대변', type: '대변' },
+  { key: 'both', label: '둘 다', type: '소변+대변' },
+  { key: 'none', label: '없음', type: '배설없음' },
+];
+
 const optionsFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.options ?? COMMON_OPTIONS;
 const sheetTitleFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.title ?? '무슨 일이 있었나요?';
 const sheetButtonFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.button ?? '예외';
@@ -139,6 +159,8 @@ export default function WorkboardScreen() {
   const { mutate: createProvision, isPending: isSaving , mutateAsync: createProvisionAsync } = useCreateServiceProvision();
 
   const [exceptionFor, setExceptionFor] = useState<Row | null>(null);
+  /** 배변 유무 시트(배변 케어 행을 탭했을 때) — 4버튼 + 건너뛰기 */
+  const [bowelFor, setBowelFor] = useState<Row | null>(null);
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
 
   // ── 오늘의 작업판: 계획(오늘 요일+매일) × 기록 매칭 → 시각 블록 ──
@@ -232,6 +254,18 @@ export default function WorkboardScreen() {
         },
       },
     );
+  };
+
+  /**
+   * 행 탭 = 정상 완료. 배변 케어만 저장 직전에 배변 유무 시트를 한 번 띄운다.
+   * (저장 후에 물으면 이미 만들어진 관찰기록의 유형을 고칠 API 가 없다 — 그래서 저장 전에 묻는다)
+   */
+  const tapRow = (row: Row) => {
+    if (!row.done && row.schedule.serviceType === 'defecation') {
+      setBowelFor(row);
+      return;
+    }
+    record(row);
   };
 
   // ① 되돌리기 (2026-08-23 자체 점검): 잘못 누른 체크를 현장에서 되돌린다.
@@ -382,7 +416,7 @@ export default function WorkboardScreen() {
                             isException ? '예외로 기록됨' : '이미 기록됨',
                             `${done.staffName ?? '다른 직원'}님이 기록했습니다${done.startAt ? ` (${toKSTTime(done.startAt)})` : ''}.${done.note ? `\n\n${done.note}` : ''}`,
                           )
-                        : record(row))}
+                        : tapRow(row))}
                     >
                       <MaterialCommunityIcons
                         name={done ? (isException ? 'alert-circle' : 'check-circle') : 'checkbox-blank-circle-outline'}
@@ -456,6 +490,47 @@ export default function WorkboardScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── 배변 유무 시트 — 큰 카드 4개, 탭 즉시 닫히고 저장 (2026-09-03 vc9) ── */}
+      <Modal visible={!!bowelFor} transparent animationType="fade" onRequestClose={() => setBowelFor(null)}>
+        <View style={st.modalBg}>
+          <View style={st.modalCard}>
+            <Text style={st.modalTitle}>{bowelFor?.schedule.residentName} — 배변 케어</Text>
+            <Text style={st.modalSub}>무엇이 있었나요?</Text>
+            <View style={st.bowelGrid}>
+              {BOWEL_OPTIONS.map((o) => (
+                <TouchableOpacity
+                  key={o.key}
+                  style={st.bowelCard}
+                  onPress={() => {
+                    const row = bowelFor;
+                    setBowelFor(null);
+                    // note 는 넘기지 않는다 — 가상행(시설 일과표 파생)은 note 로 되찾으므로
+                    // record() 안의 기본값(row.schedule.note)이 유지되어야 매칭이 깨지지 않는다.
+                    if (row) record(row, undefined, { type: o.type });
+                  }}
+                >
+                  <Text style={st.bowelCardText}>{o.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {/* 강요 금지 — 건너뛰면 detail 없이 저장(기존 동작 그대로) */}
+            <TouchableOpacity
+              style={st.bowelSkip}
+              onPress={() => {
+                const row = bowelFor;
+                setBowelFor(null);
+                if (row) record(row);
+              }}
+            >
+              <Text style={st.bowelSkipText}>건너뛰기 — 그냥 완료로 기록</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={st.modalCancel} onPress={() => setBowelFor(null)}>
+              <Text style={st.modalCancelText}>닫기 (기록하지 않음)</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -505,4 +580,18 @@ const st = StyleSheet.create({
   modalOptionText: { fontSize: FONT.body, fontWeight: '700', color: COLOR.text },
   modalCancel: { minHeight: TOUCH.min, alignItems: 'center', justifyContent: 'center' },
   modalCancelText: { fontSize: FONT.body, color: COLOR.textMuted, fontWeight: '600' },
+
+  // 배변 유무 시트 — 2×2 큰 카드
+  bowelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.md },
+  bowelCard: {
+    flexGrow: 1, flexBasis: '45%', minHeight: TOUCH.menu,
+    borderRadius: RADIUS.md, borderWidth: 2, borderColor: COLOR.primary,
+    backgroundColor: COLOR.surface, alignItems: 'center', justifyContent: 'center',
+  },
+  bowelCardText: { fontSize: FONT.heading, fontWeight: '800', color: COLOR.primary },
+  bowelSkip: {
+    minHeight: TOUCH.min, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: COLOR.bg,
+  },
+  bowelSkipText: { fontSize: FONT.label, fontWeight: '700', color: COLOR.textSub },
 });

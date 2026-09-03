@@ -12,6 +12,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useSession, useRole } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/auth/auth-store';
+import { AttendanceCard } from '@/components/AttendanceCard';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 export interface QuickAction {
@@ -59,6 +60,13 @@ export function RoleHome({
             <Text style={styles.logoutText}>로그아웃</Text>
           </TouchableOpacity>
         </View>
+
+        {/*
+          근태 카드 — 역할 홈 공통 (vc9 GPS 자동 출퇴근).
+          여기 있는 이유: 출근은 **앱을 열면 자동으로** 기록되어야 하고(대표 확정),
+          홈이 모든 역할의 첫 화면이다. 사람이 누르는 것은 [퇴근] 하나뿐이다.
+        */}
+        <AttendanceCard />
 
         <Text style={styles.sectionTitle}>{title}</Text>
 

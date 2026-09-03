@@ -10,3 +10,5 @@ export * from './useServiceProvisions';
 export * from './useServiceSchedules';
 export * from './useBeaconServiceLog';
 export * from './useObservationCards';
+export * from './useAttendance';
+export * from './usePrograms';

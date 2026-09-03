@@ -25,4 +25,6 @@ export const IS_DEV = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
 export const STORAGE_KEYS = {
   token: 'topcare.worker.token',
   session: 'topcare.worker.session',
+  /** 자동 출근을 이미 보낸 날짜(KST 'YYYY-MM-DD') — 하루 첫 성공 후 재전송 방지 */
+  autoCheckinDate: 'topcare.worker.autoCheckinDate',
 } as const;

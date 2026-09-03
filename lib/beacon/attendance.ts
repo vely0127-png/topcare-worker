@@ -9,6 +9,7 @@
  * "그날 첫 enter = 출근, 그날 마지막 exit = 퇴근" 의 최소 규칙만 둔다.
  */
 import { api } from '../api/client';
+import { toKSTDate } from '../utils/date';
 
 export interface AttendanceResult {
   id: string;
@@ -29,8 +30,9 @@ export async function postAttendance(
   return api.post<AttendanceResult>('/api/staff/attendance', { staffId, type });
 }
 
+/** 하루 1회 디바운스 키 — KST 기준(UTC 슬라이스면 09시에 날이 바뀌어 오전 출근이 두 번 전송됨) */
 function todayKey(now = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  return toKSTDate(now);
 }
 
 /**

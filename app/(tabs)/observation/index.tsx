@@ -26,7 +26,7 @@ import {
   type ObservationCardSuggestion,
 } from '@/lib/hooks/useObservationCards';
 import { useSession } from '@/lib/hooks/useAuth';
-import { getKSTToday } from '@/lib/utils/date';
+import { getKSTToday, getKSTNowWallClockIso } from '@/lib/utils/date';
 import {
   OBSERVATION_DOMAINS, getButtonsByDomain,
   type ObservationDomain, type ObservationButton,
@@ -127,7 +127,6 @@ export default function ObservationScreen() {
       return;
     }
 
-    const today = new Date();
     const content = [...selected.map(s => s.autoText), trimmedFree].filter(Boolean).join(' ');
 
     createRecord(
@@ -136,7 +135,9 @@ export default function ObservationScreen() {
         recordType: 'observation',
         // KST 날짜 — UTC 슬라이스면 새벽 0~9시 기록이 전날로 밀린다(야간 근무 시간대)
         recordDate: getKSTToday(),
-        recordTime: today.toISOString(),
+        // ⛔ toISOString() = UTC 벽시계. recordTime 은 시각만 담는 컬럼이라
+        //    07:00 기록이 22:00으로 남았다(2026-09-03 QA P2) → KST 벽시계로 보낸다.
+        recordTime: getKSTNowWallClockIso(),
         content,
         staffId: session?.user.staffId ?? null,
       },

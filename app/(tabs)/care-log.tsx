@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useResidents } from '../../lib/hooks/useResidents';
 import { useCareRecordCreate } from '../../lib/hooks/useCareRecords';
 import { useSession } from '../../lib/hooks/useAuth';
+import { getKSTToday, getKSTNowWallClockIso } from '../../lib/utils/date';
 
 // P0-4(2026-07-27): recordType 'care_service'는 웹 어디에도 없는 값 — 보이지 않는 쓰기였다.
 // 웹이 실제로 읽는 recordType으로 매핑 (배설관찰·목욕·간호 탭, 기록지, 주간 변화 리포트에 반영됨).
@@ -50,7 +51,6 @@ export default function CareLogScreen() {
       return;
     }
 
-    const today = new Date();
     const content = activeTab === 'service'
       ? `[${selectedService}]${notes ? ' ' + notes : ''}`
       : notes;
@@ -61,8 +61,10 @@ export default function CareLogScreen() {
         residentId: selectedResident,
         // P0-4: 웹이 읽는 recordType 코드값 사용 (이전 'care_service'는 어디서도 안 보였음)
         recordType: activeTab === 'service' ? (serviceOpt?.recordType ?? 'observation') : 'observation',
-        recordDate: new Date(today.getTime() + 9 * 3600_000).toISOString().slice(0, 10), // KST 날짜 (새벽 전날 밀림 방지)
-        recordTime: today.toISOString(),
+        recordDate: getKSTToday(), // KST 날짜 (새벽 전날 밀림 방지)
+        // ⛔ toISOString() = UTC 벽시계. recordTime 은 시각만 담는 컬럼이라
+        //    07:00 기록이 22:00으로 남았다(2026-09-03 QA P2) → KST 벽시계로 보낸다.
+        recordTime: getKSTNowWallClockIso(),
         content,
         staffId: session?.user.staffId ?? null,
       },

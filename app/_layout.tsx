@@ -7,11 +7,9 @@ import { StatusBar } from 'expo-status-bar';
 import { QueryClientProvider } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 
-import { useQuery } from '@tanstack/react-query';
-
 import { queryClient } from '@/lib/query-client';
-import { apiFetch } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/auth/auth-store';
+import { useConsentGate } from '@/lib/hooks/useConsentGate';
 import { homeRouteForRole } from '@/lib/auth/roles';
 import { initPushNotifications, unregisterPushToken } from '@/lib/notifications';
 import { BeaconProvider } from '@/lib/beacon/provider';
@@ -30,12 +28,8 @@ function useAuthGuard() {
 
   // 첫 접속 동의 게이트 (2026-08-05) — 개인정보 동의 미서명이면 /consent로.
   // 문안 버전이 개정되면 서버가 required:true를 돌려줘 자동 재동의된다.
-  const consentGate = useQuery({
-    queryKey: ['consent-gate'],
-    queryFn: () => apiFetch<{ required: boolean }>('/api/consent?type=worker_privacy'),
-    enabled: status === 'authenticated',
-    staleTime: Infinity,
-  });
+  // 정의는 lib/hooks/useConsentGate (근태 카드도 같은 쿼리를 본다 — 동의 전 위치 측정 금지)
+  const consentGate = useConsentGate();
 
   useEffect(() => {
     if (status === 'loading') return;
