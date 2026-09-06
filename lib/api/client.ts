@@ -56,7 +56,17 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
   auth?: boolean;
   /** 401 자동 refresh 재시도 여부 (기본 true). */
   retryOnUnauthorized?: boolean;
+  /**
+   * 요청 타임아웃(ms, 기본 15000) — 약전파에서 fetch가 걸려 있으면 오프라인 큐가
+   * 발동하지 않는 문제(2026-09-06 PD 검토 후속 ②)의 수정. 타임아웃 시 ApiError가 아니라
+   * name='TimeoutError'인 일반 Error를 던진다 — offline-queue의 shouldQueue()가
+   * ApiError가 아닌 오류는 네트워크 오류로 보고 큐에 넣도록 이미 돼 있다.
+   */
+  timeoutMs?: number;
 }
+
+/** 기본 요청 타임아웃 — 15초 안에 응답이 없으면 TimeoutError로 실패시켜 큐 재시도로 넘긴다. */
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 function buildHeaders(options: RequestOptions, token: string | null): Headers {
   const headers = new Headers(options.headers as HeadersInit | undefined);
@@ -91,19 +101,36 @@ export async function apiFetch<T = unknown>(
   options: RequestOptions = {},
 ): Promise<T> {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
-  const { body, rawBody, auth, retryOnUnauthorized, headers: _h, ...rest } = options;
+  const { body, rawBody, auth, retryOnUnauthorized, timeoutMs, headers: _h, ...rest } = options;
+  const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const doRequest = async (token: string | null): Promise<Response> => {
-    return fetch(url, {
-      ...rest,
-      headers: buildHeaders(options, token),
-      body:
-        rawBody !== undefined
-          ? rawBody
-          : body !== undefined
-            ? JSON.stringify(body)
-            : undefined,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      return await fetch(url, {
+        ...rest,
+        headers: buildHeaders(options, token),
+        signal: controller.signal,
+        body:
+          rawBody !== undefined
+            ? rawBody
+            : body !== undefined
+              ? JSON.stringify(body)
+              : undefined,
+      });
+    } catch (e: any) {
+      // AbortController가 끊은 경우만 타임아웃으로 변환한다 — ApiError가 아닌 일반 Error라
+      // offline-queue.shouldQueue()가 네트워크 오류로 판정해 큐에 넣는다.
+      if (e?.name === 'AbortError') {
+        const timeoutError = new Error(`응답 시간 초과(${Math.round(timeout / 1000)}초) — 전파를 확인하세요`);
+        timeoutError.name = 'TimeoutError';
+        throw timeoutError;
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   let token = auth === false ? null : tokenProvider();

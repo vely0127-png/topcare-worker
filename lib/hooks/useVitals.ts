@@ -4,8 +4,10 @@
  * GET  /api/vitals  입소자 전원 + 최신 실측 1건(없으면 measured:false, 값 전부 null)
  * POST /api/vitals  { measuredDate, entries: [...] } 일괄 저장
  */
-import { useQueryClient } from '@tanstack/react-query';
-import { useApiQuery, useApiMutation } from './useApi';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useApiQuery } from './useApi';
+import { ApiError } from '../api/client';
+import { postWithQueue } from '../queue/offline-queue';
 
 export interface VitalItem {
   residentId: string;
@@ -76,20 +78,25 @@ export interface VitalSaveResult {
  */
 export function useVitalsSave() {
   const qc = useQueryClient();
-  return useApiMutation<VitalSaveResult, { measuredDate: string; entries: VitalEntry[] }>(
-    'post',
-    '/api/vitals',
-    {
-      onSuccess: () => {
-        void qc.invalidateQueries({ queryKey: ['vitals'] });
-        void qc.invalidateQueries({ queryKey: ['alerts'] });
-        // 2026-08-31 대표 지시: 수치를 넣으면 공동 작업판의 '바이탈 측정' 행이 바로 완료로 보여야 한다.
-        // 서버가 바이탈 저장 시 vital 제공기록을 만들어 주므로(웹 /api/vitals),
-        // 여기서 제공기록 캐시를 무효화하지 않으면 20초 폴링 전까지 미완료로 남는다.
-        void qc.invalidateQueries({ queryKey: ['service-provisions'] });
-      },
+  return useMutation<VitalSaveResult, ApiError | Error, { measuredDate: string; entries: VitalEntry[] }>({
+    // 오프라인 큐 대상(2026-09-06 vc11 베타 차단) — 라운드 중 전파가 약해 저장이 실패하면
+    // (네트워크·5xx) 큐에 넣고 QueuedOfflineError를 던진다. 화면(vitals/measure.tsx)은
+    // 이걸 "저장 실패"가 아니라 "대기 중, 다음 분으로 진행 가능"으로 구분해야 한다.
+    mutationFn: (vars) => postWithQueue<VitalSaveResult>({
+      kind: 'vitals',
+      label: `바이탈 측정(${vars.entries.length}명)`,
+      url: '/api/vitals',
+      body: vars as unknown as Record<string, unknown>,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['vitals'] });
+      void qc.invalidateQueries({ queryKey: ['alerts'] });
+      // 2026-08-31 대표 지시: 수치를 넣으면 공동 작업판의 '바이탈 측정' 행이 바로 완료로 보여야 한다.
+      // 서버가 바이탈 저장 시 vital 제공기록을 만들어 주므로(웹 /api/vitals),
+      // 여기서 제공기록 캐시를 무효화하지 않으면 20초 폴링 전까지 미완료로 남는다.
+      void qc.invalidateQueries({ queryKey: ['service-provisions'] });
     },
-  );
+  });
 }
 
 // ── 입력값 검증 (서버 FIELD_RANGE 와 동일) ─────────────────────────

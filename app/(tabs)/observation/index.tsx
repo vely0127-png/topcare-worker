@@ -27,6 +27,7 @@ import {
 } from '@/lib/hooks/useObservationCards';
 import { useSession } from '@/lib/hooks/useAuth';
 import { getKSTToday, getKSTNowWallClockIso } from '@/lib/utils/date';
+import { QueuedOfflineError } from '@/lib/queue/offline-queue';
 import {
   OBSERVATION_DOMAINS, getButtonsByDomain,
   type ObservationDomain, type ObservationButton,
@@ -162,6 +163,17 @@ export default function ObservationScreen() {
           }
         },
         onError: (err) => {
+          // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 유실이 아니다.
+          // 성공과 같이 입력값을 비우되(로컬에 이미 안전하게 담김), 문구는 "대기 중"으로 정직하게 구분한다.
+          if (err instanceof QueuedOfflineError) {
+            Alert.alert('대기 중', `${resident?.name ?? '입주자'} 어르신 관찰 기록 — ${err.message}`);
+            setSelected([]);
+            setFreeText('');
+            setSuggestions([]);
+            setSuggestionErrors({});
+            setLearnedNotice(null);
+            return;
+          }
           Alert.alert('저장 실패', err.message);
         },
       },

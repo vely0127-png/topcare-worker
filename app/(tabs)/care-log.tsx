@@ -12,6 +12,7 @@ import { useResidents } from '../../lib/hooks/useResidents';
 import { useCareRecordCreate } from '../../lib/hooks/useCareRecords';
 import { useSession } from '../../lib/hooks/useAuth';
 import { getKSTToday, getKSTNowWallClockIso } from '../../lib/utils/date';
+import { QueuedOfflineError } from '../../lib/queue/offline-queue';
 
 // P0-4(2026-07-27): recordType 'care_service'는 웹 어디에도 없는 값 — 보이지 않는 쓰기였다.
 // 웹이 실제로 읽는 recordType으로 매핑 (배설관찰·목욕·간호 탭, 기록지, 주간 변화 리포트에 반영됨).
@@ -79,6 +80,15 @@ export default function CareLogScreen() {
           setNotes('');
         },
         onError: (err) => {
+          // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 유실이 아니다. "대기 중"으로 안내하고
+          // 입력값은 성공과 동일하게 비운다(이미 로컬 큐에 안전하게 담겼으므로 재입력 불필요).
+          if (err instanceof QueuedOfflineError) {
+            const resident = residents.find(r => r.id === selectedResident);
+            Alert.alert('대기 중', `${resident?.name ?? '입주자'} 어르신 기록 — ${err.message}`);
+            setSelectedService('');
+            setNotes('');
+            return;
+          }
           Alert.alert('저장 실패', err.message);
         },
       },

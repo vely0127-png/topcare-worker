@@ -13,6 +13,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiListQuery, useApiQuery } from './useApi';
 import { api, ApiError } from '../api/client';
+import { postWithQueue } from '../queue/offline-queue';
 
 // ── 판정 ────────────────────────────────────────────────────────
 /** 서버 판정(lib/geo.ts judgeGeoVerdict). 'web' = 좌표 없이 들어온 호출(웹 헤더 버튼). */
@@ -73,8 +74,18 @@ export interface PostAttendanceVars {
 
 export function usePostAttendance() {
   const qc = useQueryClient();
-  return useMutation<Attendance, ApiError, PostAttendanceVars>({
-    mutationFn: (vars) => api.post<Attendance>('/api/staff/attendance', vars),
+  return useMutation<Attendance, ApiError | Error, PostAttendanceVars>({
+    // 오프라인 큐 대상(2026-09-06 vc11 베타 차단) — occurredAt은 보내지 않는다(sendOccurredAt:false).
+    // 서버 계약이 의도적으로 클라이언트 시각을 받지 않는다(폰 시계 조작 방지 — 위 파일 주석
+    // "시각 정본 = 서버 수신 시각"). 큐가 지연 전송해도 서버는 여전히 수신 시각을 남긴다
+    // (offline-queue.ts 상단 주석 참고 — 기존 수동 재시도와 같은 특성, 새 위험 아님).
+    mutationFn: (vars) => postWithQueue<Attendance>({
+      kind: 'attendance',
+      label: vars.type === 'checkin' ? 'GPS 출근' : 'GPS 퇴근',
+      url: '/api/staff/attendance',
+      body: vars as unknown as Record<string, unknown>,
+      sendOccurredAt: false,
+    }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['attendance'] }),
   });
 }

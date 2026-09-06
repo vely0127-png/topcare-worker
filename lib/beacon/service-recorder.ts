@@ -22,6 +22,7 @@ import type { ServiceSchedule } from '../hooks/useServiceSchedules';
 import { matchScheduleByTime } from '../hooks/useServiceSchedules';
 import { postPresenceEvent, type PresenceMode, type PresencePostResult } from '../hooks/usePresence';
 import { beaconRegistry } from './registry';
+import { QueuedOfflineError } from '../queue/offline-queue';
 
 // ── 열린 서비스(enter 후 exit 전) 추적 ────────────────────────
 export interface OpenService {
@@ -122,6 +123,24 @@ export class ServiceRecorder {
         this.openNoProvisionUuids.add(event.uuid);
       }
     } catch (e) {
+      // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 유실이 아니다. 나중에 exit이 이
+      // uuid를 "열린 방문"으로 인식하도록 성공했을 때와 같은 로컬 상태를 남긴다.
+      // provisionId는 아직 없다(서버가 아직 못 받음) — null로 열어 둔다(타입상 이미 nullable).
+      if (e instanceof QueuedOfflineError) {
+        if (usable) {
+          this.openMap.set(event.uuid, {
+            provisionId: null,
+            beaconUuid: event.uuid,
+            residentId: resident.id,
+            serviceType: usable.serviceType,
+            startAt: occurredAt,
+          });
+        } else {
+          this.openNoProvisionUuids.add(event.uuid);
+        }
+        this.opts.onServerMessage?.(e.message);
+        return;
+      }
       this.opts.onError?.('enter', e instanceof Error ? e : new Error(String(e)));
     }
   }
@@ -166,6 +185,17 @@ export class ServiceRecorder {
         this.opts.onDraftCreated?.(res.provision.id, false);
       }
     } catch (e) {
+      if (e instanceof QueuedOfflineError) {
+        this.openMap.set(event.uuid, {
+          provisionId: null,
+          beaconUuid: event.uuid,
+          residentId,
+          serviceType,
+          startAt: occurredAt,
+        });
+        this.opts.onServerMessage?.(e.message);
+        return;
+      }
       this.opts.onError?.('manual', e instanceof Error ? e : new Error(String(e)));
     }
   }
@@ -203,6 +233,15 @@ export class ServiceRecorder {
       this.openNoProvisionUuids.delete(event.uuid);
       this.opts.onServiceEnded?.(open?.provisionId ?? null, occurredAt);
     } catch (e) {
+      // 오프라인 큐 — exit 사실 자체는 큐에 안전하게 담겼으므로 로컬 상태는 정리한다
+      // (성공 시와 동일 — 그래야 다음 enter/exit 사이클이 꼬이지 않는다).
+      if (e instanceof QueuedOfflineError) {
+        this.openMap.delete(event.uuid);
+        this.openNoProvisionUuids.delete(event.uuid);
+        this.opts.onServiceEnded?.(open?.provisionId ?? null, occurredAt);
+        this.opts.onServerMessage?.(e.message);
+        return;
+      }
       this.opts.onError?.('exit', e instanceof Error ? e : new Error(String(e)));
     }
   }

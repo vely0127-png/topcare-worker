@@ -14,6 +14,8 @@ import { homeRouteForRole } from '@/lib/auth/roles';
 import { initPushNotifications, unregisterPushToken } from '@/lib/notifications';
 import { BeaconProvider } from '@/lib/beacon/provider';
 import { WebQaBanner } from '@/components/WebQaBanner';
+import { OfflineQueueBadge } from '@/components/OfflineQueueBadge';
+import { initOfflineQueue } from '@/lib/queue/offline-queue';
 import { keepBaseUrl } from '@/lib/ui/keep-base-url';
 
 // 웹 주소창의 /worker 접두사 유지 — expo-router 가 부팅 때 떼어버려서
@@ -81,6 +83,12 @@ export default function RootLayout() {
     void bootstrap();
   }, [bootstrap]);
 
+  // 오프라인 큐 — 앱 전체에서 한 번만 초기화(저장소 로드 + 즉시 flush 1회 + 포그라운드 복귀 감시).
+  // 로그인 여부와 무관하게 시작해도 안전하다: 큐에 항목이 없으면 아무 일도 하지 않는다.
+  useEffect(() => {
+    initOfflineQueue();
+  }, []);
+
   useEffect(() => {
     if (status !== 'authenticated') return;
     void initPushNotifications();
@@ -110,6 +118,8 @@ export default function RootLayout() {
           <StatusBar style="light" />
           {/* 웹 QA 빌드에서만 보이는 안내 (실기기에선 렌더링 안 함) */}
           <WebQaBanner />
+          {/* 오프라인 큐에 대기 중인 기록이 있을 때만 보임 — 없으면 렌더링 안 함 */}
+          <OfflineQueueBadge />
           {/* 비콘 스캐너는 앱 전체에서 하나. 로그인 상태 + 포그라운드면 자동으로 돈다
               (2026-08-06 대표 지시: "스캔은 앱 사용시 기본 설정") */}
           <BeaconProvider>

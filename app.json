@@ -3,7 +3,7 @@
     "name": "TopCare 종사자",
     "slug": "topcare-worker",
     "scheme": "topcare-worker",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {

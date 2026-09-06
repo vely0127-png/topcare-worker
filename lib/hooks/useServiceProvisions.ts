@@ -11,6 +11,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
+import { postWithQueue } from '../queue/offline-queue';
 
 // ── 타입 ──────────────────────────────────────────────────────
 export type ProvisionStatus = 'draft' | 'confirmed' | 'rejected';
@@ -94,8 +95,15 @@ export interface CreateServiceProvisionVars {
 
 export function useCreateServiceProvision() {
   const qc = useQueryClient();
-  return useMutation<ServiceProvision, ApiError, CreateServiceProvisionVars>({
-    mutationFn: (vars) => api.post<ServiceProvision>('/api/care/service-provisions', vars),
+  return useMutation<ServiceProvision, ApiError | Error, CreateServiceProvisionVars>({
+    // 오프라인 큐 대상(2026-09-06 vc11 베타 차단, 작업판 체크) — 직접 전송이 네트워크·5xx로
+    // 실패하면 큐에 넣고 QueuedOfflineError를 던진다(workboard.tsx의 record()에서 구분 처리).
+    mutationFn: (vars) => postWithQueue<ServiceProvision>({
+      kind: 'service-provision',
+      label: `작업판 기록(${vars.serviceType})`,
+      url: '/api/care/service-provisions',
+      body: vars as unknown as Record<string, unknown>,
+    }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['service-provisions'] }),
   });
 }

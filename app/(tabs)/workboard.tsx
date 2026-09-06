@@ -37,7 +37,7 @@
  *   ③ 예외(거부·일부·이상)도 초록 완료로 보였다 → 주황 '예외' 배지로 구분(상태 가시성).
  *   ④ [남은 N건 모두 완료]가 병렬 요청 + 실패마다 알림 폭탄이었다 → 순차 저장 후 결과 1회 요약.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl, Modal
@@ -55,6 +55,8 @@ import { serviceTypeLabel } from '@/lib/care/service-rules';
 import { buildRoutineSchedules, findVirtualProvision, isVirtualSchedule } from '@/lib/care/routine-rows';
 import { kstHHMM } from '@/lib/hooks/useTodayTasks';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
+import { QueuedOfflineError, type QueueItem } from '@/lib/queue/offline-queue';
+import { useOfflineQueue } from '@/lib/hooks/useOfflineQueue';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 /**
@@ -135,6 +137,24 @@ const EXCEPTION_NOTES: string[] = Array.from(new Set(
 const isExceptionRecord = (p: ServiceProvision | null) =>
   !!p?.note && EXCEPTION_NOTES.includes(p.note);
 
+/**
+ * 큐 항목(QueueItem) → 작업판 행 키(row.schedule.id) 역산 (2026-09-06 PD 검토 후속 ③).
+ * 실계획은 body.scheduleId가 곧 행 키다. 가상행(시설 일과표 파생)은 서버에 id가 없어
+ * lib/care/routine-rows.ts의 가상행 id 생성 규약(v|residentId|시각|일과내용)을 그대로
+ * body.residentId·startAt·note로 재구성한다. 재구성 불가(형태가 다른 항목)면 null —
+ * 호출부가 큐 길이 변화로 보완한다.
+ */
+function queueItemRowKey(item: QueueItem): string | null {
+  if (item.kind !== 'service-provision') return null;
+  const body = item.body as Record<string, unknown>;
+  if (typeof body.scheduleId === 'string' && body.scheduleId) return body.scheduleId;
+  const { residentId, startAt, note } = body;
+  if (typeof residentId === 'string' && typeof startAt === 'string' && typeof note === 'string') {
+    return `v|${residentId}|${startAt.slice(11, 16)}|${note}`;
+  }
+  return null;
+}
+
 type Row = {
   schedule: ServiceSchedule;
   done: ServiceProvision | null; // 오늘 이 계획 행의 기록 (선착 1건)
@@ -162,6 +182,30 @@ export default function WorkboardScreen() {
   /** 배변 유무 시트(배변 케어 행을 탭했을 때) — 4버튼 + 건너뛰기 */
   const [bowelFor, setBowelFor] = useState<Row | null>(null);
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  /**
+   * 큐에 들어간 행(row.schedule.id) — 체크 대신 "대기 중"으로 렌더하고 재탭을 막는다
+   * (2026-09-06 PD 검토 후속 ③, QueuedOfflineError를 받았을 때 record()/recordSequentially()가 추가).
+   */
+  const [queuedKeys, setQueuedKeys] = useState<Set<string>>(new Set());
+  const { pending: queuedPending } = useOfflineQueue();
+
+  // 큐에서 사라진 항목(전송 성공 · 409 제거)은 queuedKeys에서 빼고 판을 한 번 새로고침한다.
+  // scheduleId(실계획)/재구성한 가상행 키로 매칭한다(queueItemRowKey).
+  useEffect(() => {
+    if (queuedKeys.size === 0) return;
+    const stillQueued = new Set(
+      queuedPending.map(queueItemRowKey).filter((k): k is string => !!k),
+    );
+    const removed = [...queuedKeys].filter((k) => !stillQueued.has(k));
+    if (removed.length === 0) return;
+    setQueuedKeys((prev) => {
+      const next = new Set(prev);
+      removed.forEach((k) => next.delete(k));
+      return next;
+    });
+    void provisionsQ.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedPending]);
 
   // ── 오늘의 작업판: 계획(오늘 요일+매일) × 기록 매칭 → 시각 블록 ──
   const blocks: Block[] = useMemo(() => {
@@ -247,7 +291,17 @@ export default function WorkboardScreen() {
           if (created?.warning) RNAlert.alert('확인 필요', created.warning); // 서버 경고 숨기지 않기
           onDone?.();
         },
-        onError: (e) => RNAlert.alert('저장 실패', e?.message ?? '네트워크를 확인하세요'),
+        onError: (e) => {
+          // 오프라인 큐(2026-09-06 vc11) — 전파가 약해 큐에 들어간 것은 실패가 아니다.
+          // 시트를 닫고 대기 중임을 알린다(체크는 이미 로컬에 안전하게 남았다).
+          if (e instanceof QueuedOfflineError) {
+            setQueuedKeys((prev) => new Set(prev).add(row.schedule.id));
+            RNAlert.alert('대기 중', e.message);
+            onDone?.();
+            return;
+          }
+          RNAlert.alert('저장 실패', e?.message ?? '네트워크를 확인하세요');
+        },
         onSettled: () => {
           setSavingIds((prev) => { const s = new Set(prev); s.delete(row.schedule.id); return s; });
           void provisionsQ.refetch();
@@ -322,6 +376,7 @@ export default function WorkboardScreen() {
 
   const recordSequentially = async (rows: Row[]) => {
     const failures: string[] = [];
+    let queuedCount = 0;
     for (const r of rows) {
       setSavingIds((prev) => new Set(prev).add(r.schedule.id));
       try {
@@ -337,7 +392,13 @@ export default function WorkboardScreen() {
           note: virtual ? r.schedule.note : null,
         });
       } catch (e: any) {
-        failures.push(`${r.schedule.residentName ?? '(이름 없음)'}: ${e?.message ?? '저장 실패'}`);
+        // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 실패가 아니다. 실패 목록에 넣지 않는다.
+        if (e instanceof QueuedOfflineError) {
+          queuedCount += 1;
+          setQueuedKeys((prev) => new Set(prev).add(r.schedule.id));
+        } else {
+          failures.push(`${r.schedule.residentName ?? '(이름 없음)'}: ${e?.message ?? '저장 실패'}`);
+        }
       } finally {
         setSavingIds((prev) => { const t = new Set(prev); t.delete(r.schedule.id); return t; });
       }
@@ -346,9 +407,11 @@ export default function WorkboardScreen() {
     // 실패를 조용히 삼키지 않는다 — 몇 건이 안 됐는지 한 번에 알려준다
     if (failures.length > 0) {
       RNAlert.alert(
-        `${rows.length}건 중 ${failures.length}건 실패`,
+        `${rows.length}건 중 ${failures.length}건 실패${queuedCount > 0 ? ` · ${queuedCount}건 대기 중` : ''}`,
         `${failures.slice(0, 5).join('\n')}${failures.length > 5 ? `\n… 외 ${failures.length - 5}건` : ''}\n\n실패한 분은 목록에 남아 있으니 다시 눌러 주세요.`,
       );
+    } else if (queuedCount > 0) {
+      RNAlert.alert('대기 중', `전파가 약해 ${queuedCount}건을 대기열에 넣었습니다. 신호가 돌아오면 자동 전송됩니다.`);
     }
   };
 
@@ -406,11 +469,13 @@ export default function WorkboardScreen() {
                 const done = row.done;
                 const isException = isExceptionRecord(done);
                 const undoing = !!done && undoingIds.has(done.id);
+                // ⑤ 큐 대기 행 — 체크가 아니다(가짜 완료 금지). 재탭도 막는다(중복 전송 방지).
+                const isQueued = !done && queuedKeys.has(row.schedule.id);
                 return (
                   <View key={row.schedule.id} style={st.rowWrap}>
                     <TouchableOpacity
-                      style={[st.row, done ? (isException ? st.rowException : st.rowDone) : null]}
-                      disabled={saving || undoing}
+                      style={[st.row, done ? (isException ? st.rowException : st.rowDone) : isQueued ? st.rowQueued : null]}
+                      disabled={saving || undoing || isQueued}
                       onPress={() => (done
                         ? RNAlert.alert(
                             isException ? '예외로 기록됨' : '이미 기록됨',
@@ -419,9 +484,9 @@ export default function WorkboardScreen() {
                         : tapRow(row))}
                     >
                       <MaterialCommunityIcons
-                        name={done ? (isException ? 'alert-circle' : 'check-circle') : 'checkbox-blank-circle-outline'}
+                        name={done ? (isException ? 'alert-circle' : 'check-circle') : isQueued ? 'clock-outline' : 'checkbox-blank-circle-outline'}
                         size={30}
-                        color={done ? (isException ? COLOR.warning : COLOR.success) : COLOR.borderStrong}
+                        color={done ? (isException ? COLOR.warning : COLOR.success) : isQueued ? COLOR.textMuted : COLOR.borderStrong}
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={[st.rowName, done && !isException && st.rowNameDone]}>
@@ -434,21 +499,23 @@ export default function WorkboardScreen() {
                         </Text>
                         {/* ③ 예외는 완료와 구분해 보여준다 — 거부·일부인데 초록 완료로 보이면 안 된다 */}
                         {isException && <Text style={st.exceptionTag}>예외 — {done?.note}</Text>}
+                        {/* ⑤ 대기 중은 체크가 아니다 — 회색 라벨로만 알린다 */}
+                        {isQueued && <Text style={st.queuedTag}>대기 중 — 전파가 돌아오면 자동 전송됩니다</Text>}
                       </View>
                       {(saving || undoing) && <ActivityIndicator size="small" color={COLOR.primary} />}
                     </TouchableOpacity>
-                    {!done ? (
+                    {!done && !isQueued ? (
                       <TouchableOpacity style={st.exceptionBtn} onPress={() => setExceptionFor(row)}>
                         <Text style={st.exceptionBtnText}>{sheetButtonFor(row.schedule.serviceType)}</Text>
                       </TouchableOpacity>
-                    ) : (
+                    ) : done ? (
                       // ① 되돌리기 — 내가 기록한 건만 (남의 기록은 서버 이전에 화면에서 막는다)
                       (!staffId || !done.staffId || done.staffId === staffId) && (
                         <TouchableOpacity style={st.undoBtn} disabled={undoing} onPress={() => undo(row)}>
                           <Text style={st.undoBtnText}>되돌리기</Text>
                         </TouchableOpacity>
                       )
-                    )}
+                    ) : null}
                   </View>
                 );
               })}
@@ -551,6 +618,9 @@ const st = StyleSheet.create({
   blockCurrent: { borderColor: COLOR.primary, borderWidth: 2 },
   rowException: { backgroundColor: COLOR.warningBg },
   exceptionTag: { fontSize: FONT.caption, color: COLOR.warning, fontWeight: '600', marginTop: 2 },
+  // ⑤ 대기 중(큐) — 완료(초록)·예외(주황)와 구분되는 회색 스타일 관례(itemCard와 동일 규약)
+  rowQueued: { backgroundColor: COLOR.bg, borderColor: COLOR.border },
+  queuedTag: { fontSize: FONT.caption, color: COLOR.textMuted, fontWeight: '600', marginTop: 2 },
   undoBtn: { minHeight: TOUCH.min, minWidth: 96, paddingHorizontal: SPACE.md, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLOR.border, alignItems: 'center', justifyContent: 'center' },
   undoBtnText: { fontSize: FONT.label, color: COLOR.textSub, fontWeight: '700' },
   blockHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, marginBottom: SPACE.md },

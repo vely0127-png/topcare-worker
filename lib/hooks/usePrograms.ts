@@ -16,7 +16,8 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiQuery } from './useApi';
-import { api, ApiError } from '../api/client';
+import { ApiError } from '../api/client';
+import { postWithQueue } from '../queue/offline-queue';
 
 export type ResultGrade = '상' | '중' | '하';
 
@@ -92,9 +93,15 @@ export interface CreateProgramProvisionResult {
 
 export function useCreateProgramProvision() {
   const qc = useQueryClient();
-  return useMutation<CreateProgramProvisionResult, ApiError, CreateProgramProvisionVars>({
-    mutationFn: (vars) =>
-      api.post<CreateProgramProvisionResult>('/api/schedule/programs/provisions', vars),
+  return useMutation<CreateProgramProvisionResult, ApiError | Error, CreateProgramProvisionVars>({
+    // 오프라인 큐 대상(2026-09-06 vc11 베타 차단) — 직접 전송이 네트워크·5xx로 실패하면
+    // 큐에 넣고 QueuedOfflineError를 던진다(programs/record.tsx의 catch에서 구분 처리).
+    mutationFn: (vars) => postWithQueue<CreateProgramProvisionResult>({
+      kind: 'program-provision',
+      label: `프로그램 기록(참여 ${vars.participantIds.length}명)`,
+      url: '/api/schedule/programs/provisions',
+      body: vars as unknown as Record<string, unknown>,
+    }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['programs'] });
       // 참여자별 급여제공기록이 함께 생기므로 작업판·기록 목록도 다시 읽는다

@@ -33,6 +33,7 @@ import {
   useVitals, useVitalsSave, vitalRangeError, alertReasons, cautionNotes,
   type VitalItem, type VitalField, type VitalNumbers,
 } from '@/lib/hooks/useVitals';
+import { QueuedOfflineError } from '@/lib/queue/offline-queue';
 import { useBeaconProximity } from '@/lib/hooks/useBeaconProximity';
 import { getKSTToday, toKSTDate, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
@@ -178,7 +179,16 @@ export default function VitalMeasureScreen() {
         if (isLast) finish();
         else goTo(index + 1);
       } catch (e) {
-        // 가짜 성공 금지 — 실패하면 그 자리에 머문다(입력값 유지)
+        // 오프라인 큐(2026-09-06 vc11) — 전파가 약해 큐에 들어간 것은 유실이 아니다.
+        // "저장 실패"로 막지 않고 다음 분으로 진행한다(대기 중 표시만 남긴다).
+        if (e instanceof QueuedOfflineError) {
+          setSavedNow((prev) => ({ ...prev, [current.residentId]: alerts }));
+          RNAlert.alert('대기 중', `${current.name}님 측정값을 ${e.message}`, [
+            { text: '확인', onPress: () => (isLast ? finish() : goTo(index + 1)) },
+          ]);
+          return;
+        }
+        // 그 외 실패(검증 오류·인증 등)는 가짜 성공 금지 — 그 자리에 머문다(입력값 유지)
         setSaveError(`저장 실패: ${(e as Error)?.message ?? '네트워크를 확인하세요'}`);
       }
     })();

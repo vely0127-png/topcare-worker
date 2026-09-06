@@ -12,7 +12,7 @@
  *   'event-only'     이벤트만 (매칭 실패 — 체류는 사실이므로 남기되 기록지는 안 만듦)
  *   'provision-only' 초안만 (위 방문을 사람이 나중에 수동 선택 — enter 이벤트는 이미 있음)
  */
-import { api } from '../api/client';
+import { postWithQueue } from '../queue/offline-queue';
 
 export type PresenceMode = 'full' | 'event-only' | 'provision-only';
 
@@ -50,5 +50,14 @@ export interface PresencePostResult {
 }
 
 export function postPresenceEvent(vars: PresencePostVars): Promise<PresencePostResult> {
-  return api.post<PresencePostResult>('/api/presence/events', vars);
+  // 오프라인 큐 대상(2026-09-06 vc11 베타 차단, 비콘 체류 이벤트) — occurredAt은 vars에
+  // 이미 있으므로(위 인터페이스 필수 필드) postWithQueue가 그대로 살려 보낸다.
+  // 직접 전송이 네트워크·5xx로 실패하면 큐에 넣고 QueuedOfflineError를 던진다
+  // (service-recorder.ts의 send()에서 구분 처리 — 화면에 "오류"가 아니라 "대기 중"으로 알림).
+  return postWithQueue<PresencePostResult>({
+    kind: 'beacon-presence',
+    label: `비콘 ${vars.eventType === 'enter' ? '입장' : '이탈'}${vars.serviceType ? `(${vars.serviceType})` : ''}`,
+    url: '/api/presence/events',
+    body: vars as unknown as Record<string, unknown>,
+  });
 }

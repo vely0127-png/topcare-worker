@@ -35,6 +35,7 @@ import {
   useProgramsToday, useCreateProgramProvision,
   type ParticipantResultEntry, type ResultGrade,
 } from '@/lib/hooks/usePrograms';
+import { QueuedOfflineError } from '@/lib/queue/offline-queue';
 import { getKSTToday } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -122,6 +123,16 @@ export default function ProgramRecordScreen() {
       void q.refetch();
       router.back();
     } catch (e: any) {
+      // 오프라인 큐(2026-09-06 vc11) — 전파가 약해 큐에 들어간 것은 실패가 아니다.
+      // 급여제공기록 연계는 전송 후에나 알 수 있으므로 여기서는 "대기 중"만 알린다.
+      if (e instanceof QueuedOfflineError) {
+        Alert.alert(
+          '대기 중',
+          `${row.programName} · 참여 ${participantIds.length}명\n${e.message}\n\n급여제공기록 연계 여부는 전송 뒤 웹에서 확인하세요.`,
+        );
+        router.back();
+        return;
+      }
       Alert.alert('저장 실패', e?.message ?? '네트워크를 확인하고 다시 시도하세요');
     }
   };

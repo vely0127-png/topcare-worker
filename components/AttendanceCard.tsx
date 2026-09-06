@@ -33,6 +33,7 @@ import {
 import { useConsentGate } from '@/lib/hooks/useConsentGate';
 import { acquireLocationOnce } from '@/lib/attendance/location';
 import { loadAutoCheckinDate, saveAutoCheckinDate } from '@/lib/attendance/day-memo';
+import { QueuedOfflineError } from '@/lib/queue/offline-queue';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -104,6 +105,13 @@ export function AttendanceCard() {
       await saveAutoCheckinDate(today);
       void attendanceQ.refetch();
     } catch (e: any) {
+      // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 유실이 아니다. 하루 1회 재전송 방지
+      // 메모를 그대로 남겨(전송은 큐가 보장) 포그라운드마다 중복으로 큐잉되지 않게 한다.
+      if (e instanceof QueuedOfflineError) {
+        setLocationNote(`출근 요청이 ${e.message}`);
+        await saveAutoCheckinDate(today);
+        return;
+      }
       // 실패는 성공으로 위장하지 않는다 — 메모도 남기지 않아 다음 진입에서 다시 시도한다.
       autoRunRef.current = false;
       setSendError(e?.message ?? '출근 기록 전송에 실패했습니다');
@@ -138,6 +146,11 @@ export function AttendanceCard() {
         `${at ? `${at} 퇴근으로 기록했습니다.` : '퇴근으로 기록했습니다.'}\n위치: ${verdictLabel(saved.checkMeta?.checkout?.verdict)}${note ? `\n\n${note}` : ''}`,
       );
     } catch (e: any) {
+      // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 실패가 아니다. "대기 중"으로 안내한다.
+      if (e instanceof QueuedOfflineError) {
+        Alert.alert('대기 중', `퇴근 요청이 ${e.message}`);
+        return;
+      }
       setSendError(e?.message ?? '퇴근 기록 전송에 실패했습니다');
       Alert.alert('퇴근 기록 실패', e?.message ?? '네트워크를 확인하고 다시 시도하세요');
     } finally {
