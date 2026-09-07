@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 15분 초과 노화 상태 배경(명세 A5) — 회색 처리로 "오래된 정보"를 시각적으로도 드러낸다. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#E8E8E8" />
+    <corners android:radius="16dp" />
+</shape>

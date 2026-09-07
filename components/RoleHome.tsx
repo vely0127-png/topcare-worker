@@ -13,6 +13,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSession, useRole } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { AttendanceCard } from '@/components/AttendanceCard';
+import { WidgetPromoCard } from '@/components/WidgetPromoCard';
+import { WidgetPinButton } from '@/components/WidgetPinButton';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 export interface QuickAction {
@@ -60,6 +62,10 @@ export function RoleHome({
             <Text style={styles.logoutText}>로그아웃</Text>
           </TouchableOpacity>
         </View>
+
+        {/* 홈 위젯 안내 카드(W2) — 첫 로그인 후 1회만(내부에서 노출 여부 자체 판단),
+            Android 아니면 아무것도 렌더링하지 않는다. headerRow 바로 아래(통합 지점 지시). */}
+        <WidgetPromoCard />
 
         {/*
           근태 카드 — 역할 홈 공통 (vc9 GPS 자동 출퇴근).
@@ -112,6 +118,10 @@ export function RoleHome({
             그 외 업무는 아직 앱에 없습니다. 웹(관리자 화면)에서 이용하세요.
           </Text>
         ) : null}
+
+        {/* 홈 화면에 위젯 추가 버튼(W2) — 전용 설정 화면이 아직 없어 역할 홈 하단에 둔다
+            (components/WidgetPinButton.tsx 통합 지점 주석). Android 아니면 렌더 안 함. */}
+        <WidgetPinButton />
       </ScrollView>
     </SafeAreaView>
   );

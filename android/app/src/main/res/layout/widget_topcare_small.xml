@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  홈 위젯 2x2 소형 레이아웃(건수만, 명세 A2). id는
+  TopCareWidgetProvider.buildSmallView가 RemoteViews로 참조한다.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root_small"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_normal"
+    android:padding="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/app_name"
+            android:textColor="@color/colorPrimaryDark"
+            android:textStyle="bold"
+            android:textSize="11sp"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/widget_freshness_small"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#8A8A8A"
+            android:textSize="9sp"
+            android:singleLine="true"
+            tools:text="10:32 기준" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_login_required_small"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:textColor="#8A8A8A"
+        android:textSize="11sp"
+        android:visibility="gone"
+        tools:text="로그인 필요" />
+
+    <LinearLayout
+        android:id="@+id/widget_content_small"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/small_alerts_count"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#B91C1C"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            tools:text="경고 2건" />
+
+        <TextView
+            android:id="@+id/small_services_count"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/colorPrimary"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            tools:text="서비스 6건" />
+
+        <TextView
+            android:id="@+id/small_directives_count"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#8A8A8A"
+            android:textSize="12sp"
+            tools:text="지시 2건" />
+    </LinearLayout>
+
+</LinearLayout>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+(dataExtractionRules). ADR-001 §6-2 / A5: 위젯 스냅샷을
+     클라우드 백업/기기 이전 양쪽에서 제외한다(기기 분실 시나리오 대비). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="topcare_widget.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="topcare_widget.xml" />
+    </device-transfer>
+</data-extraction-rules>

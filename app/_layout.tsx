@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { View, ActivityIndicator, StyleSheet, AppState, type AppStateStatus } from 'react-native';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments, usePathname, useGlobalSearchParams } from 'expo-router';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -18,6 +18,9 @@ import { OfflineQueueBadge } from '@/components/OfflineQueueBadge';
 import { initOfflineQueue } from '@/lib/queue/offline-queue';
 import { initMeasure, measure } from '@/lib/measure/client';
 import { keepBaseUrl } from '@/lib/ui/keep-base-url';
+import { useWidgetSync } from '@/lib/widget/useWidgetSync';
+import { capturePendingDeepLink, usePendingDeepLinkRedirect } from '@/lib/widget/pending-deeplink';
+import { handleRefreshMessage } from '@/lib/widget/handle-refresh-message';
 
 // 웹 주소창의 /worker 접두사 유지 — expo-router 가 부팅 때 떼어버려서
 // 새로고침하면 404 가 났다. 네이티브에서는 no-op. 모듈 로드 시 1회.
@@ -28,6 +31,19 @@ function useAuthGuard() {
   const session = useAuthStore((s) => s.session);
   const segments = useSegments();
   const router = useRouter();
+  // 위젯 딥링크 로그인 복귀(W2) — 현재 경로(쿼리 포함, entry=widget 여부 판정용)를
+  // /login으로 튕기기 직전에 잡아 둔다. usePathname()은 쿼리를 안 주므로
+  // useGlobalSearchParams()로 문자열 값만 다시 붙인다.
+  const pathname = usePathname();
+  const searchParams = useGlobalSearchParams();
+  const currentPathWithQuery = useMemo(() => {
+    const qs = new URLSearchParams();
+    Object.entries(searchParams).forEach(([k, v]) => {
+      if (typeof v === 'string') qs.set(k, v);
+    });
+    const q = qs.toString();
+    return q ? `${pathname}?${q}` : pathname;
+  }, [pathname, searchParams]);
 
   // 첫 접속 동의 게이트 (2026-08-05) — 개인정보 동의 미서명이면 /consent로.
   // 문안 버전이 개정되면 서버가 required:true를 돌려줘 자동 재동의된다.
@@ -39,13 +55,15 @@ function useAuthGuard() {
     const group = segments[0];
     const inAuthScreen = group === 'login';
     if (status === 'unauthenticated' && !inAuthScreen) {
+      // 위젯발 딥링크(entry=widget)만 저장된다(isWidgetEntryPath) — 일반 탐색은 무시.
+      void capturePendingDeepLink(currentPathWithQuery);
       router.replace('/login');
     } else if (status === 'authenticated' && consentGate.data?.required && group !== 'consent') {
       router.replace('/consent');
     } else if (status === 'authenticated' && (inAuthScreen || group === undefined)) {
       router.replace(homeRouteForRole(session?.user.role));
     }
-  }, [status, session, segments, router, consentGate.data]);
+  }, [status, session, segments, router, consentGate.data, currentPathWithQuery]);
 
   // 실증 측정 — 홈(역할별 큰 버튼 메뉴) 진입 시 T1 과업 시작(ADR-001 §7).
   // 역할별 홈 화면 7개 각각에 심지 않고 여기 한 곳에서 잡는다 — segments[0] === '(home)'이면
@@ -76,6 +94,12 @@ function useAuthGuard() {
 
 function RootNavigator() {
   const status = useAuthGuard();
+  // 홈 위젯 동기화(W2) — RootLayout이 아니라 여기 둔다: useAuthGuard()도 이 컴포넌트
+  // 최상위에서 상태와 무관하게 항상 호출되는 것과 같은 자리(훅 규칙 — early return 뒤에
+  // 두면 loading→authenticated 전환 사이 훅 호출 개수가 달라져 규칙 위반이 된다).
+  useWidgetSync();
+  // 위젯 딥링크 로그인 복귀(W2) — authenticated 전환 순간 저장된 목적지로 1회 이동.
+  usePendingDeepLinkRedirect();
   if (status === 'loading') {
     return (
       <View style={styles.splash}>
@@ -127,7 +151,10 @@ export default function RootLayout() {
   useEffect(() => {
     if (status !== 'authenticated') return;
     void initPushNotifications();
-    notifRef.current = Notifications.addNotificationReceivedListener(() => {
+    notifRef.current = Notifications.addNotificationReceivedListener((n) => {
+      // 위젯 새로고침 신호(W2, type:'widget_refresh') — 관련 쿼리 무효화 →
+      // useWidgetSync가 새 데이터로 스냅샷을 다시 쓴다(디바운스 5초 뒤).
+      handleRefreshMessage(n.request.content.data, queryClient);
       void queryClient.invalidateQueries({ queryKey: ['alerts'] });
     });
     responseRef.current = Notifications.addNotificationResponseReceivedListener((_r) => {

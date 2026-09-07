@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 미만(레거시 Auto Backup). ADR-001 §6-2 / A5:
+     위젯 스냅샷(topcare_widget)은 호실·이니셜·(선택 시) 성명을 담을 수 있어
+     클라우드 백업에서 제외한다 — 새 기기 복원 시 스냅샷이 부활하는 걸 막는다. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="topcare_widget.xml" />
+</full-backup-content>

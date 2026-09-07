@@ -37,14 +37,16 @@
  *   ③ 예외(거부·일부·이상)도 초록 완료로 보였다 → 주황 '예외' 배지로 구분(상태 가시성).
  *   ④ [남은 N건 모두 완료]가 병렬 요청 + 실패마다 알림 폭탄이었다 → 순차 저장 후 결과 1회 요약.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Modal
+  ActivityIndicator, RefreshControl, Modal, findNodeHandle
 } from 'react-native';
 import { Alert as RNAlert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
+import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';
 
 import { useServiceSchedules, hhmmToMin, type ServiceSchedule } from '@/lib/hooks/useServiceSchedules';
 import { useServiceProvisions, useCreateServiceProvision, useDeleteServiceProvision, type ServiceProvision } from '@/lib/hooks/useServiceProvisions';
@@ -170,6 +172,18 @@ export default function WorkboardScreen() {
   const [undoingIds, setUndoingIds] = useState<Set<string>>(new Set());
   const todayDow = new Date(`${today}T12:00:00+09:00`).getDay();
 
+  // 위젯 딥링크 진입 (W2 통합) — 서비스 행 탭(records/[residentId] 경유, scheduleId·
+  // residentId 전달) 또는 [지금 할 일] 헤더 탭(workboard?block=now&entry=widget 직결,
+  // TopCareWidgetProvider.kt 딥링크 규약)으로 들어온 경우 해당 행/블록으로 스크롤·강조한다.
+  const { residentId: widgetResidentId, scheduleId: widgetScheduleId, block: widgetBlock, entry: widgetEntry } =
+    useLocalSearchParams<{ residentId?: string; scheduleId?: string; block?: string; entry?: string }>();
+  useWidgetEntryMeasure('workboard', widgetEntry);
+  const scrollRef = useRef<ScrollView>(null);
+  const highlightRowRef = useRef<View>(null);
+  const [highlightRowKey, setHighlightRowKey] = useState<string | null>(null);
+  const [highlightBlockStart, setHighlightBlockStart] = useState<string | null>(null);
+  const widgetTargetConsumedRef = useRef(false);
+
   const schedulesQ = useServiceSchedules({ isActive: true });
   const provisionsQ = useServiceProvisions({ date: today, limit: 300 });
   // 시설 일과표 × 입소자 — 웹 [서비스 시간표]와 같은 목록을 보기 위한 원천 (2026-08-31)
@@ -259,6 +273,51 @@ export default function WorkboardScreen() {
     blocks.forEach((b, i) => { if (hhmmToMin(b.start) <= nowMin + 30) idx = i; });
     return idx >= 0 ? idx : 0;
   }, [blocks, nowMin]);
+
+  // 위젯 딥링크 매칭 — scheduleId(정확한 행) > residentId(그 입소자의 첫 행) >
+  // block==='now'(현재 블록 컨테이너만, 특정 행 없음) 순으로 찾는다.
+  const widgetTarget = useMemo(() => {
+    if (!widgetScheduleId && !widgetResidentId && !widgetBlock) return null;
+    if (widgetScheduleId) {
+      for (const b of blocks) {
+        const row = b.rows.find((r) => r.schedule.id === widgetScheduleId);
+        if (row) return { rowKey: row.schedule.id as string | null, blockStart: b.start };
+      }
+    }
+    if (widgetResidentId) {
+      for (const b of blocks) {
+        const row = b.rows.find((r) => r.schedule.residentId === widgetResidentId);
+        if (row) return { rowKey: row.schedule.id as string | null, blockStart: b.start };
+      }
+    }
+    if (widgetBlock === 'now' && blocks[currentIdx]) {
+      return { rowKey: null as string | null, blockStart: blocks[currentIdx].start };
+    }
+    return null;
+  }, [widgetScheduleId, widgetResidentId, widgetBlock, blocks, currentIdx]);
+
+  // 데이터가 도착한 뒤 1회만 스크롤·강조(재조회로 blocks가 새 참조로 바뀌어도 재실행 안 함).
+  useEffect(() => {
+    if (!widgetTarget || widgetTargetConsumedRef.current || blocks.length === 0) return;
+    widgetTargetConsumedRef.current = true;
+    setHighlightRowKey(widgetTarget.rowKey);
+    setHighlightBlockStart(widgetTarget.blockStart);
+    const scrollTimer = setTimeout(() => {
+      const handle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+      if (handle && highlightRowRef.current) {
+        highlightRowRef.current.measureLayout(
+          handle,
+          (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(y - 120, 0), animated: true }),
+          () => { /* 레이아웃 측정 실패 — 스크롤 없이 강조만 유지 */ },
+        );
+      }
+    }, 300);
+    const clearTimer = setTimeout(() => {
+      setHighlightRowKey(null);
+      setHighlightBlockStart(null);
+    }, 2300);
+    return () => { clearTimeout(scrollTimer); clearTimeout(clearTimer); };
+  }, [widgetTarget, blocks.length]);
 
   const nowIso = () => {
     const d = new Date(Date.now() + 9 * 3600_000);
@@ -442,6 +501,7 @@ export default function WorkboardScreen() {
   return (
     <SafeAreaView style={st.safe} edges={['bottom']}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={st.scroll}
         refreshControl={<RefreshControl refreshing={!!provisionsQ.isRefetching} onRefresh={refetchAll} />}
       >
@@ -470,7 +530,10 @@ export default function WorkboardScreen() {
           const remaining = block.rows.filter((r) => !r.done).length;
           const isCurrent = i === currentIdx;
           return (
-            <View key={block.start} style={[st.block, isCurrent && st.blockCurrent]}>
+            <View
+              key={block.start}
+              style={[st.block, isCurrent && st.blockCurrent, highlightBlockStart === block.start && st.blockHighlight]}
+            >
               <View style={st.blockHeader}>
                 <Text style={[st.blockTime, isCurrent && { color: COLOR.primary }]}>{block.start}</Text>
                 {isCurrent && <Text style={st.nowChip}>지금</Text>}
@@ -487,10 +550,19 @@ export default function WorkboardScreen() {
                 const undoing = !!done && undoingIds.has(done.id);
                 // ⑤ 큐 대기 행 — 체크가 아니다(가짜 완료 금지). 재탭도 막는다(중복 전송 방지).
                 const isQueued = !done && queuedKeys.has(row.schedule.id);
+                const isHighlighted = highlightRowKey === row.schedule.id;
                 return (
-                  <View key={row.schedule.id} style={st.rowWrap}>
+                  <View
+                    key={row.schedule.id}
+                    style={st.rowWrap}
+                    ref={isHighlighted ? highlightRowRef : undefined}
+                  >
                     <TouchableOpacity
-                      style={[st.row, done ? (isException ? st.rowException : st.rowDone) : isQueued ? st.rowQueued : null]}
+                      style={[
+                        st.row,
+                        done ? (isException ? st.rowException : st.rowDone) : isQueued ? st.rowQueued : null,
+                        isHighlighted && st.rowHighlight,
+                      ]}
                       disabled={saving || undoing || isQueued}
                       onPress={() => (done
                         ? RNAlert.alert(
@@ -639,6 +711,9 @@ const st = StyleSheet.create({
 
   block: { backgroundColor: COLOR.surface, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.lg, borderWidth: 1, borderColor: COLOR.border },
   blockCurrent: { borderColor: COLOR.primary, borderWidth: 2 },
+  // 위젯 딥링크 진입 강조 — 2초간(하이라이트 해제는 화면 로직에서 타이머로 처리)
+  blockHighlight: { borderColor: COLOR.primary, borderWidth: 2, backgroundColor: '#EAF2F8' },
+  rowHighlight: { borderColor: COLOR.primary, borderWidth: 2, backgroundColor: '#EAF2F8' },
   rowException: { backgroundColor: COLOR.warningBg },
   exceptionTag: { fontSize: FONT.caption, color: COLOR.warning, fontWeight: '600', marginTop: 2 },
   // ⑤ 대기 중(큐) — 완료(초록)·예외(주황)와 구분되는 회색 스타일 관례(itemCard와 동일 규약)

@@ -49,6 +49,24 @@ const MAX_QUEUE = 200; // 오래 쌓여도 메모리를 먹지 않게 상한(웹
 /** 표면 표기 — 위젯 도입 후 'surface:widget'/'entry:widget' 로 구분할 자리(현재는 앱뿐). */
 const SCOPE_TAG = 'surface:app';
 
+/**
+ * 위젯 진입 표면 오버라이드 (W2, 2026-09-07).
+ * setEntrySurface('widget')를 부르면 그 뒤에 나가는 이벤트의 scopeTag가
+ * 'surface:app;entry:widget'(≤60자)로 바뀐다. null이면 기본값(SCOPE_TAG)으로 돌아간다.
+ * 위젯 딥링크로 열린 화면(app/alerts/[id].tsx 등)에서 마운트 시 1회 설정하고,
+ * 그 화면을 벗어나면(언마운트) 반드시 null로 되돌려야 한다 — 그렇지 않으면 이후의
+ * 일반 진입(entry 없음)까지 위젯 표면으로 잘못 태깅된다.
+ */
+let entrySurface: 'widget' | null = null;
+
+export function setEntrySurface(surface: 'widget' | null): void {
+  entrySurface = surface;
+}
+
+function currentScopeTag(): string {
+  return entrySurface === 'widget' ? `${SCOPE_TAG};entry:widget` : SCOPE_TAG;
+}
+
 let queue: Ev[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -122,7 +140,7 @@ function build(partial: {
 }): Ev {
   return {
     axis: task?.axis ?? null,
-    scopeTag: SCOPE_TAG,
+    scopeTag: currentScopeTag(),
     taskCode: task?.code ?? null,
     taskRunId: task?.runId ?? null,
     screen: partial.screen ?? null,

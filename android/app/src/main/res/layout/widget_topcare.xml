@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  홈 위젯 4x2 기본 레이아웃(표시형, ADR-001 §4-1 / 명세 A2).
+  이 파일의 android:id는 TopCareWidgetProvider.buildLargeView가 RemoteViews로
+  참조한다 — id를 바꾸면 그쪽 코드도 같이 바꿔야 한다.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_normal"
+    android:padding="12dp">
+
+    <!-- 헤더: 제목 + 기준 시각 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/app_name"
+            android:textColor="@color/colorPrimaryDark"
+            android:textStyle="bold"
+            android:textSize="13sp"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/widget_freshness"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#8A8A8A"
+            android:textSize="11sp"
+            android:singleLine="true"
+            tools:text="10:32 기준" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_login_required"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:textColor="#8A8A8A"
+        android:textSize="13sp"
+        android:visibility="gone"
+        tools:text="로그인 필요" />
+
+    <LinearLayout
+        android:id="@+id/widget_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- 경고 -->
+        <TextView
+            android:id="@+id/header_alerts"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/widget_section_alerts"
+            android:textColor="@color/colorPrimary"
+            android:textStyle="bold"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/alert_row_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="101호 고○○ — 혈압 위험" />
+
+        <TextView
+            android:id="@+id/alert_row_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="102호 이○ — 재측정 10:30까지" />
+
+        <TextView
+            android:id="@+id/alert_row_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="103호 박○ — 낙상 감지" />
+
+        <!-- 지금 할 서비스 -->
+        <TextView
+            android:id="@+id/header_services"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/widget_section_services"
+            android:textColor="@color/colorPrimary"
+            android:textStyle="bold"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/service_row_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="101호 고○○ — 체위변경 (14:00)" />
+
+        <TextView
+            android:id="@+id/service_row_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="102호 이○ — 식사보조 (14:10)" />
+
+        <TextView
+            android:id="@+id/service_row_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="103호 박○ — 투약 (14:20)" />
+
+        <TextView
+            android:id="@+id/service_progress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#8A8A8A"
+            android:textSize="11sp"
+            tools:text="완료 3/9" />
+
+        <!-- 업무 지시(건수만) -->
+        <TextView
+            android:id="@+id/row_directives"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/colorPrimary"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            tools:text="업무 지시 미완료 2건" />
+    </LinearLayout>
+
+    <!-- 하단: 미전송 배지 + 앱 열기 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/queue_badge"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#B45309"
+            android:textSize="11sp"
+            android:visibility="gone"
+            tools:text="미전송 2건" />
+
+        <TextView
+            android:id="@+id/btn_open_app"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_open_app"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:background="@drawable/widget_button_bg"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp" />
+    </LinearLayout>
+
+</LinearLayout>

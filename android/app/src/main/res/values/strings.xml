@@ -2,4 +2,14 @@
   <string name="app_name">TopCare 종사자</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
+
+  <!-- 홈 위젯 v1(표시형) — ADR-001 -->
+  <string name="widget_description">경고·지금 할 서비스·업무 지시를 홈 화면에서 확인합니다. 위젯에서 기록을 작성하지 않습니다.</string>
+  <string name="widget_section_alerts">경고</string>
+  <string name="widget_section_services">지금 할 서비스</string>
+  <string name="widget_section_directives">업무 지시</string>
+  <string name="widget_open_app">앱 열기</string>
+  <string name="widget_login_required">로그인 필요</string>
+  <string name="widget_stale_prefix">오래된 정보</string>
+  <string name="widget_refresh_in_app">앱을 열어 새로고침</string>
 </resources>

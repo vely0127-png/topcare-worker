@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, findNodeHandle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { useLocalSearchParams } from 'expo-router';
 import { useAlerts, useAcknowledgeAlert, type AlertItem, type AlertSeverity } from '@/lib/hooks/useAlerts';
 import EmergencyAlertModal from '@/components/EmergencyAlertModal';
 import { measure } from '@/lib/measure/client';
+import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';
 
 type SeverityConfig = { bg: string; border: string; text: string; label: string };
 const SEV_CFG: Record<AlertSeverity, SeverityConfig> = {
@@ -39,14 +41,14 @@ function relTime(iso: string): string {
 
 type FilterTab = 'all' | 'new' | 'critical';
 
-interface CardProps { item: AlertItem; onAck: (id: string) => void; acking: boolean; }
+interface CardProps { item: AlertItem; onAck: (id: string) => void; acking: boolean; highlighted?: boolean; }
 
-function AlertCard({ item, onAck, acking }: CardProps) {
+function AlertCard({ item, onAck, acking, highlighted }: CardProps) {
   const cfg = SEV_CFG[item.severity];
   const title = TYPE_LABELS[item.type] ?? item.title;
   const isNew = item.status === 'new';
   return (
-    <View style={[s.card, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
+    <View style={[s.card, { backgroundColor: cfg.bg, borderColor: cfg.border }, highlighted && s.cardHighlight]}>
       <View style={s.row}>
         <View style={[s.badge, { backgroundColor: cfg.text }]}>
           <Text style={s.badgeTxt}>{SEV_LABELS[item.severity]}</Text>
@@ -73,6 +75,16 @@ export default function AlertsScreen() {
   const [ackingId, setAckingId] = useState<string | null>(null);
   const shownRef = useRef(new Set<string>());
 
+  // 위젯 딥링크 진입(W2 통합) — topcare-worker://alerts?entry=widget(목록 직결) 또는
+  // app/alerts/[id].tsx 리다이렉트가 넘긴 id·entry(topcare-worker://alerts/{id}?entry=widget).
+  const { id: widgetAlertId, entry: widgetEntry } =
+    useLocalSearchParams<{ id?: string; entry?: string }>();
+  useWidgetEntryMeasure('alerts-list', widgetEntry);
+  const scrollRef = useRef<ScrollView>(null);
+  const highlightCardRef = useRef<View>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const widgetTargetConsumedRef = useRef(false);
+
   const apiOpts = filter === 'new' ? { status: 'new' as const }
     : filter === 'critical' ? { severity: 'Critical' as const }
     : undefined;
@@ -85,6 +97,28 @@ export default function AlertsScreen() {
   useEffect(() => {
     measure.navigate('alerts:detail');
   }, []);
+
+  // 위젯에서 특정 알림 id로 들어온 경우 해당 카드로 스크롤·강조(2초). 목록 직결
+  // (id 없음)이면 스크롤 없이 위젯 진입 측정만 남는다.
+  useEffect(() => {
+    if (!widgetAlertId || widgetTargetConsumedRef.current || isLoading || alerts.length === 0) return;
+    const found = alerts.some((a) => a.id === widgetAlertId);
+    if (!found) return;
+    widgetTargetConsumedRef.current = true;
+    setHighlightId(widgetAlertId);
+    const scrollTimer = setTimeout(() => {
+      const handle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+      if (handle && highlightCardRef.current) {
+        highlightCardRef.current.measureLayout(
+          handle,
+          (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(y - 120, 0), animated: true }),
+          () => { /* 레이아웃 측정 실패 — 스크롤 없이 강조만 유지 */ },
+        );
+      }
+    }, 300);
+    const clearTimer = setTimeout(() => setHighlightId(null), 2300);
+    return () => { clearTimeout(scrollTimer); clearTimeout(clearTimer); };
+  }, [widgetAlertId, alerts, isLoading]);
 
   useEffect(() => {
     const found = alerts.find(
@@ -127,6 +161,7 @@ export default function AlertsScreen() {
           ))}
         </View>
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={s.list}
           refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => void refetch()} tintColor="#1A5276" />}
         >
@@ -147,9 +182,14 @@ export default function AlertsScreen() {
           {!isLoading && !isError && alerts.length === 0 && (
             <View style={s.center}><Text style={s.emptyTxt}>알림이 없습니다</Text></View>
           )}
-          {alerts.map((a) => (
-            <AlertCard key={a.id} item={a} onAck={handleAck} acking={ackingId === a.id} />
-          ))}
+          {alerts.map((a) => {
+            const isHighlighted = highlightId === a.id;
+            return (
+              <View key={a.id} ref={isHighlighted ? highlightCardRef : undefined}>
+                <AlertCard item={a} onAck={handleAck} acking={ackingId === a.id} highlighted={isHighlighted} />
+              </View>
+            );
+          })}
         </ScrollView>
       </SafeAreaView>
     </>
@@ -173,6 +213,8 @@ const s = StyleSheet.create({
   retryTxt: { color: '#fff', fontWeight: '600' },
   emptyTxt: { color: '#9CA3AF', fontSize: 18 },
   card: { borderRadius: 12, borderWidth: 1.5, padding: 14, gap: 6 },
+  // 위젯 딥링크 진입 강조 — 2초간
+  cardHighlight: { borderColor: '#1A5276', borderWidth: 3 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   badgeTxt: { color: '#fff', fontSize: 14, fontWeight: '700' },

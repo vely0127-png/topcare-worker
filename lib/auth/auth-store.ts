@@ -23,6 +23,8 @@ import {
 } from './storage';
 import { normalizeRole, type RoleKey } from './roles';
 import type { AuthSession, AuthStatus, LoginCredentials } from './types';
+// 홈 위젯(W2, 2026-09-07, ADR-001 C-10) — 로그아웃 시 위젯 스냅샷도 즉시 지운다.
+import { clearWidgetSnapshot } from '../widget/write-snapshot';
 
 interface AuthState {
   status: AuthStatus;
@@ -95,6 +97,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     await clearAuthStorage();
+    void clearWidgetSnapshot(); // 위젯 잔존 콘텐츠 파기(ADR §6-2·C-10) — 실패해도 로그아웃을 막지 않는다
     set({ status: 'unauthenticated', session: null, token: null, error: null });
   },
 
