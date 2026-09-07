@@ -40,7 +40,10 @@
  *   - 4xx(검증 오류, 401/403 제외) → "실패함"으로 분리 보관, 자동 재시도 중단(무한 재시도 금지).
  *     사람이 목록에서 확인 후 [다시 시도] 또는 [폐기]를 고른다.
  *   - 5xx·네트워크 오류(fetch 자체 실패) → 지수 백오프(5s→10s→20s→40s→60s 상한) 자동 재시도.
- *   - 401/403 → 인증 문제라 큐 대상 자체가 아니다(postWithQueue가 그대로 throw).
+ *   - 401/403 → 최초 직접 전송 시점에는 인증 문제라 큐 대상 자체가 아니다(postWithQueue가
+ *     그대로 throw). 단, 이미 큐에 들어간 항목이 나중에 flushQueue에서 401/403(또는
+ *     ApiError.code === 'ACCOUNT_DISABLED')을 받으면(세션 만료·계정 비활성화 등, S-15)
+ *     5xx처럼 무한 재시도하지 않고 "실패함"으로 분류해 자동 재시도를 멈춘다.
  *   - 409 ALREADY_RECORDED(2026-09-06 PD 검토 후속 ①) → "실패"가 아니다. 같은 계획·같은 날짜
  *     기록이 이미 존재해 큐 항목의 목적이 이미 달성된 상태이므로, 실패함으로 분류하지 않고
  *     조용히 제거한다. 단 "조용히"는 아니고 lastResolvedNotice에 한 줄 남겨 배지가 한 번 보여준다.
@@ -50,10 +53,32 @@
  *   포함해 보낸다. 서버가 이 값으로 멱등 처리를 하는지는 라우트별로 다르다 — 미확인 라우트는
  *   보고 목록 참고. 서버 지원이 없으면 "네트워크는 성공했는데 응답을 못 받고 재시도"하는
  *   극히 드문 경우에 한해 중복 저장 가능성이 이론상 남는다(순차 FIFO라 흔치 않음).
+ *
+ * 소유자 격리 (2026-09-07, 보안검토 S-13 — 로그아웃·계정 전환 후 A의 큐가 B의 토큰으로 전송되던 결함)
+ *   각 항목은 큐에 넣는 시점의 세션에서 ownerUserId/ownerStaffId를 박아 저장한다.
+ *   flushQueue는 **현재 세션 사용자와 ownerUserId가 같은 항목만** 전송한다 — 다른 사용자
+ *   소유 항목은 건너뛰고(삭제하지 않는다), 세션이 없으면(로그아웃 상태) flush 자체를 하지 않는다.
+ *   이 필드가 없는 구 항목(마이그레이션 전 저장분)은 "소유자 미상"으로 분류돼 자동 전송되지
+ *   않으며, 현재 로그인한 사람이 claimLegacyQueueItem()으로 명시적으로 인수해야만(감사 목적
+ *   라벨에 "(인수)" 표기) 전송 대상이 된다. 재시도(retryQueueItem)·폐기(discardQueueItem)도
+ *   소유자 본인 항목에만 허용한다.
+ *
+ * 인증 오류(401/403) 및 보존 상한 (2026-09-07, 보안검토 S-15)
+ *   큐에 이미 들어간 항목이 재전송 시점에 401/403(또는 ApiError.code === 'ACCOUNT_DISABLED')을
+ *   받으면 더 이상 5xx와 같이 무한 재시도하지 않는다 — failed로 분류하고 사람이 읽을 수 있는
+ *   한글 안내로 자동 재시도를 멈춘다(로그인 필요/계정 비활성화). createdAt 기준 14일을 넘긴
+ *   항목은 자동 삭제하지 않되 목록 상단 경고 + 개별 '만료' 표시로 사람이 폐기 여부를 판단하게 한다.
+ *
+ * 409 처리 세분화 (2026-09-07, 보안검토 S-19)
+ *   error.code === 'ALREADY_RECORDED'인 409만 "목적 달성"으로 조용히 제거한다. 그 외 409
+ *   (예: 비콘 체류의 TOO_LATE)는 실패로 분리 보관한다 — 자정을 넘겨 지연 전송된 항목을
+ *   "이미 기록됨"이라는 거짓 안내와 함께 유실시키지 않기 위함이다.
  */
 import * as SecureStore from 'expo-secure-store';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { api, ApiError } from '../api/client';
+import { useAuthStore } from '../auth/auth-store';
+import { IS_DEV } from '../config';
 import { getKSTNowWallClockIso } from '../utils/date';
 
 export type QueueKind =
@@ -68,7 +93,9 @@ export interface QueueItem {
   id: string;
   clientRequestId: string;
   kind: QueueKind;
-  /** 목록·배지에 보일 한 줄 (예: "김영희 어르신 배변 케어") */
+  /** 목록·배지에 보일 한 줄 (예: "101호 배변 케어"). label에 성명·진단·측정값 금지 —
+   *  배지는 잠금 해제 직후 화면이라 로그인한 사람이면 누구나(다른 사용자 소유 항목도 건수는
+   *  보인다) 볼 수 있다는 전제로 작성한다. */
   label: string;
   url: string;
   body: Record<string, unknown>;
@@ -77,10 +104,19 @@ export interface QueueItem {
   createdAt: string;
   attempts: number;
   lastError: string | null;
+  /** lastError가 우리가 직접 작성한 한글 안내(true, 예: 인증 오류)인지 서버/JS 원문 그대로(false)
+   *  인지 — describeQueueError()가 이 값을 보고 원문 노출 여부를 정한다(S-16). 구 항목(필드
+   *  없음)은 false와 동일하게 취급(=원문 숨김)한다. */
+  lastErrorCurated?: boolean;
   /** 4xx 등 검증 오류 — 자동 재시도 중단, 사람 확인 필요 */
   failed: boolean;
   /** false면 디스크 저장이 실패해 이번 세션 메모리에만 있다(용량 초과 등) — 앱 종료 시 유실 위험 */
   persisted: boolean;
+  /** 큐에 넣은 시점의 세션 사용자 id — 소유자 격리(S-13)의 기준. 이 필드가 아예 없으면
+   *  (마이그레이션 전 구 항목) "소유자 미상"으로 분류돼 자동 전송되지 않는다. */
+  ownerUserId?: string | null;
+  /** 큐에 넣은 시점의 세션 staffId(있으면). */
+  ownerStaffId?: string | null;
 }
 
 // ── 저장소(expo-secure-store, 항목별 개별 키) ──────────────────────
@@ -242,15 +278,84 @@ async function removeItem(id: string): Promise<void> {
   notify();
 }
 
-/** 사람이 실패 항목을 다시 시도 — 실패 플래그를 풀고 즉시 전송을 시도한다 */
+// ── 소유자 격리(S-13) ───────────────────────────────────────────────
+
+/** 항목에 ownerUserId 필드 자체가 있는지(값이 null/undefined가 아닌지) — 없으면 마이그레이션 전 구 항목 */
+function hasKnownOwner(item: QueueItem): boolean {
+  return Object.prototype.hasOwnProperty.call(item, 'ownerUserId') && item.ownerUserId != null;
+}
+
+/**
+ * 항목이 현재 로그인한 사용자 소유인지 분류한다.
+ *  - 'mine'    : ownerUserId가 현재 세션 사용자와 같음 → 자동 전송·재시도·폐기 대상.
+ *  - 'other'   : ownerUserId가 있지만 다른 사용자 → 건수만 표시, 조작 불가(삭제도 하지 않는다).
+ *  - 'unknown' : ownerUserId 필드가 없는 구 항목(마이그레이션 전) → claimLegacyQueueItem으로만 인수.
+ */
+export function classifyQueueItemOwner(item: QueueItem): 'mine' | 'other' | 'unknown' {
+  if (!hasKnownOwner(item)) return 'unknown';
+  const currentUserId = useAuthStore.getState().currentUserId();
+  if (!currentUserId) return 'other'; // 로그아웃 상태에서는 소유자가 있어도 "내 것"이 아니다
+  return item.ownerUserId === currentUserId ? 'mine' : 'other';
+}
+
+/** 사람이 실패 항목을 다시 시도 — 소유자 본인 항목에만 허용한다(S-13). */
 export async function retryQueueItem(id: string): Promise<void> {
+  const items = await ensureLoaded();
+  const item = items.find((i) => i.id === id);
+  if (!item || classifyQueueItemOwner(item) !== 'mine') return;
   await updateItem(id, { failed: false, lastError: null, attempts: 0 });
   void flushQueue();
 }
 
-/** 사람이 실패 항목을 폐기 — 데이터 유실을 명시적으로 인지하고 누른 경우만(목록 UI에서 확인 문구 필요) */
+/** 사람이 실패 항목을 폐기 — 데이터 유실을 명시적으로 인지하고 누른 경우만(목록 UI에서 확인 문구 필요).
+ *  소유자 본인 항목에만 허용한다(S-13) — 다른 사용자의 기록을 감사 없이 지울 수 없게 한다. */
 export async function discardQueueItem(id: string): Promise<void> {
+  const items = await ensureLoaded();
+  const item = items.find((i) => i.id === id);
+  if (!item || classifyQueueItemOwner(item) !== 'mine') return;
   await removeItem(id);
+}
+
+/**
+ * 구 항목(마이그레이션 전 — ownerUserId 없음)을 현재 로그인한 사용자가 명시적으로 인수한다.
+ * 실제 기록자와 인수자가 다를 수 있으므로 label에 "(인수)"를 남겨 감사 목적으로 구분한다.
+ * 이미 소유자가 있는 항목(있는데 다른 사람인 경우 포함)은 인수 대상이 아니다.
+ */
+export async function claimLegacyQueueItem(id: string): Promise<void> {
+  const auth = useAuthStore.getState();
+  const currentUserId = auth.currentUserId();
+  if (!currentUserId) return; // 로그인 없이는 인수 불가
+  const items = await ensureLoaded();
+  const item = items.find((i) => i.id === id);
+  if (!item || hasKnownOwner(item)) return;
+  await updateItem(id, {
+    ownerUserId: currentUserId,
+    ownerStaffId: auth.currentStaffId(),
+    label: `${item.label} (인수)`,
+  });
+  void flushQueue();
+}
+
+// ── 보존 상한(S-15) ─────────────────────────────────────────────────
+const RETENTION_WARN_MS = 14 * 24 * 60 * 60 * 1000; // 14일 — 초과해도 자동 삭제하지 않고 경고만
+
+/** createdAt 기준 14일을 넘긴 항목인지 — 자동 폐기 근거가 아니라 사람에게 보여줄 경고용이다. */
+export function isQueueItemExpired(item: QueueItem, now: number = Date.now()): boolean {
+  const created = Date.parse(item.createdAt);
+  if (Number.isNaN(created)) return false;
+  return now - created > RETENTION_WARN_MS;
+}
+
+// ── 오류 문구(S-16) ─────────────────────────────────────────────────
+/**
+ * 목록에 보일 오류 문구. 개발 빌드(IS_DEV)이거나 우리가 직접 작성한 안내(lastErrorCurated)면
+ * 그대로 보여주고, 그 외(서버/JS 원문)에는 프로덕션에서 일반 안내로 치환한다 — 서버 오류
+ * 원문(테이블명·내부 메시지 등)이 잠금만 푼 사람에게 그대로 노출되지 않게 한다.
+ */
+export function describeQueueError(item: QueueItem): string {
+  if (!item.lastError) return '저장 실패';
+  if (IS_DEV || item.lastErrorCurated) return item.lastError;
+  return '전송에 실패했습니다 — 확인 후 다시 시도하거나 폐기하세요.';
 }
 
 /** 지금 즉시 전체 전송 시도(배지의 [지금 전송] 버튼용) */
@@ -284,17 +389,40 @@ function isValidationError(e: unknown): boolean {
 }
 
 /**
+ * 인증/계정 상태 오류(S-15) — 401·403 또는 ApiError.code === 'ACCOUNT_DISABLED'(그 외 계정 상태
+ * 코드도 같은 취급). client.ts가 401은 refresh 1회 재시도 후에도 실패한 경우만 여기 도달한다.
+ * 재시도한다고 해결되는 문제가 아니므로 5xx처럼 무한 백오프하지 않고 failed로 분류한다.
+ */
+function isAuthError(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  return e.status === 401 || e.status === 403 || e.code === 'ACCOUNT_DISABLED';
+}
+
+function authErrorMessage(e: ApiError): string {
+  if (e.code === 'ACCOUNT_DISABLED') return '계정이 비활성화되었습니다. 관리자에게 문의하세요.';
+  if (e.status === 401) return '로그인이 필요합니다. 다시 로그인한 뒤 [다시 시도]를 눌러주세요.';
+  return '접근 권한이 없습니다. 관리자에게 문의하세요.';
+}
+
+/**
  * 큐를 앞에서부터 순서대로 비운다.
+ * 세션이 없으면(로그아웃 상태) 아무것도 전송하지 않는다(S-13). 소유자가 현재 세션 사용자와
+ * 다르거나 소유자 미상(구 항목)인 항목은 건너뛰되 삭제하지 않는다 — FIFO는 같은 소유자
+ * 항목들 사이에서만 보장하면 되므로, 건너뛰어도 그 사용자 몫의 순서는 흐트러지지 않는다.
  * 5xx/네트워크 오류를 만나면 그 자리에서 멈추고(뒤 항목이 앞 항목을 추월해 순서가
- * 뒤집히지 않도록) 백오프 재시도를 예약한다. 4xx는 그 항목만 "실패함"으로 넘기고 계속 진행한다.
+ * 뒤집히지 않도록) 백오프 재시도를 예약한다. 4xx/인증 오류는 그 항목만 "실패함"으로 넘기고 계속 진행한다.
  */
 export async function flushQueue(): Promise<void> {
   if (flushing) return;
+  const currentUserId = useAuthStore.getState().currentUserId();
+  if (!currentUserId) return; // 로그아웃 상태 — flush 자체를 하지 않는다(S-13)
   flushing = true;
   try {
     const items = await ensureLoaded();
     for (const item of [...items]) {
       if (item.failed) continue;
+      const owner = classifyQueueItemOwner(item);
+      if (owner !== 'mine') continue; // 'other'(다른 사용자)·'unknown'(소유자 미상, 인수 대기) — 건너뛴다
       try {
         await api.post(item.url, item.body);
         if (item.kind === 'attendance') {
@@ -308,20 +436,39 @@ export async function flushQueue(): Promise<void> {
         clearBackoffTimer();
         backoffMs = 5_000; // 성공 — 백오프 리셋
       } catch (e) {
-        // 409 ALREADY_RECORDED — 실패가 아니라 목적 달성. "실패함"으로 넘기지 않고 제거한다.
+        // 409는 error.code로 세분화한다(S-19) — ALREADY_RECORDED만 "목적 달성", 그 외(예: 비콘
+        // 체류의 TOO_LATE)는 실패로 분리 보관해야 지연 전송된 항목이 거짓 안내와 함께 유실되지 않는다.
         if (e instanceof ApiError && e.status === 409) {
-          lastResolvedNotice = `${item.label} — 이미 기록돼 있어 대기열에서 제거됨`;
-          await removeItem(item.id);
-          clearBackoffTimer();
-          backoffMs = 5_000;
-          continue; // 나머지 항목은 계속 진행
+          if (e.code === 'ALREADY_RECORDED') {
+            lastResolvedNotice = `${item.label} — 이미 기록돼 있어 대기열에서 제거됨`;
+            await removeItem(item.id);
+            clearBackoffTimer();
+            backoffMs = 5_000;
+            continue; // 나머지 항목은 계속 진행
+          }
+          await updateItem(item.id, {
+            failed: true,
+            lastError: e.message,
+            lastErrorCurated: false,
+            attempts: item.attempts + 1,
+          });
+          continue;
+        }
+        if (isAuthError(e)) {
+          await updateItem(item.id, {
+            failed: true,
+            lastError: authErrorMessage(e as ApiError),
+            lastErrorCurated: true,
+            attempts: item.attempts + 1,
+          });
+          continue; // 인증 오류는 이 항목만 보류하고 나머지는 계속 시도
         }
         const lastError = e instanceof Error ? e.message : String(e);
         if (isValidationError(e)) {
-          await updateItem(item.id, { failed: true, lastError, attempts: item.attempts + 1 });
+          await updateItem(item.id, { failed: true, lastError, lastErrorCurated: false, attempts: item.attempts + 1 });
           continue; // 검증 오류는 이 항목만 보류하고 나머지는 계속 시도
         }
-        await updateItem(item.id, { lastError, attempts: item.attempts + 1 });
+        await updateItem(item.id, { lastError, lastErrorCurated: false, attempts: item.attempts + 1 });
         scheduleBackoffRetry();
         return; // 순서 보장 — 이후 항목은 다음 flush(백오프 또는 포그라운드 복귀)에서
       }
@@ -409,6 +556,7 @@ export async function postWithQueue<TData>(input: PostWithQueueInput): Promise<T
     return await api.post<TData>(input.url, body);
   } catch (e) {
     if (!shouldQueue(e)) throw e;
+    const auth = useAuthStore.getState();
     const item: QueueItem = {
       id: makeId(),
       clientRequestId,
@@ -420,8 +568,14 @@ export async function postWithQueue<TData>(input: PostWithQueueInput): Promise<T
       createdAt: getKSTNowWallClockIso(),
       attempts: 0,
       lastError: e instanceof Error ? e.message : String(e),
+      lastErrorCurated: false,
       failed: false,
       persisted: true,
+      // 큐에 넣는 시점의 세션에서 소유자를 박는다(S-13) — postWithQueue는 인증이 필요한
+      // mutation 경로에서만 호출되므로 이 시점에 세션이 없을 일은 사실상 없지만,
+      // 방어적으로 null일 수 있게 타입을 열어둔다(그 경우 flushQueue가 소유자 미상으로 본다).
+      ownerUserId: auth.currentUserId(),
+      ownerStaffId: auth.currentStaffId(),
     };
     const persisted = await setRaw(ITEM_KEY(item.id), JSON.stringify(item));
     item.persisted = persisted;

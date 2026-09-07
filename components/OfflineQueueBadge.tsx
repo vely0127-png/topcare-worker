@@ -13,7 +13,7 @@ import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useOfflineQueue } from '@/lib/hooks/useOfflineQueue';
-import type { QueueKind } from '@/lib/queue/offline-queue';
+import { describeQueueError, isQueueItemExpired, type QueueKind } from '@/lib/queue/offline-queue';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 const KIND_LABEL: Record<QueueKind, string> = {
@@ -26,10 +26,15 @@ const KIND_LABEL: Record<QueueKind, string> = {
 };
 
 export function OfflineQueueBadge() {
-  const { pending, failed, total, retry, discard, flushNow, resolvedNotice, dismissResolvedNotice } = useOfflineQueue();
+  const {
+    pending, failed, otherOwnerCount, unknownOwner, expiredCount, total,
+    retry, discard, claim, flushNow, resolvedNotice, dismissResolvedNotice,
+  } = useOfflineQueue();
   const [open, setOpen] = useState(false);
 
   if (total === 0 && !resolvedNotice) return null;
+
+  const mineCount = pending.length + failed.length;
 
   return (
     <>
@@ -46,7 +51,9 @@ export function OfflineQueueBadge() {
         <TouchableOpacity style={st.bar} onPress={() => setOpen(true)} accessibilityRole="button">
           <MaterialCommunityIcons name="cloud-upload-outline" size={20} color={COLOR.onPrimary} />
           <Text style={st.barText}>
-            미전송 {total}건 대기 중{failed.length > 0 ? ` · 실패함 ${failed.length}건` : ''}
+            미전송 {mineCount}건 대기 중{failed.length > 0 ? ` · 실패함 ${failed.length}건` : ''}
+            {otherOwnerCount > 0 ? ` · 다른 사용자 ${otherOwnerCount}건` : ''}
+            {unknownOwner.length > 0 ? ` · 인수 대기 ${unknownOwner.length}건` : ''}
           </Text>
           <Text style={st.barLink}>목록 보기</Text>
         </TouchableOpacity>
@@ -61,15 +68,47 @@ export function OfflineQueueBadge() {
               않았으니 목록에서 사라지기 전까지는 "저장됨"이 아니라 "대기 중"입니다.
             </Text>
 
+            {/* S-13 — 다른 사용자 소유 항목은 건수만, 조작 불가 */}
+            {otherOwnerCount > 0 && (
+              <Text style={st.otherOwnerNotice}>
+                다른 사용자의 미전송 {otherOwnerCount}건 — 해당 사용자가 로그인하면 전송됩니다.
+              </Text>
+            )}
+            {/* S-15 — 14일 초과 항목은 자동 삭제하지 않고 경고만 */}
+            {expiredCount > 0 && (
+              <Text style={st.expiredNotice}>
+                14일 넘은 대기 건 {expiredCount} — 확인 후 폐기하세요.
+              </Text>
+            )}
+
             <ScrollView style={st.list}>
+              {unknownOwner.length > 0 && (
+                <Text style={st.sectionLabel}>앱 업데이트 전 대기 건 — 기록한 직원이 인수 ({unknownOwner.length}건)</Text>
+              )}
+              {unknownOwner.map((item) => (
+                <View key={item.id} style={st.itemCard}>
+                  <Text style={st.itemLabel}>{item.label}</Text>
+                  <Text style={st.itemMeta}>
+                    {KIND_LABEL[item.kind]} · {item.occurredAt}
+                    {isQueueItemExpired(item) ? ' · 만료' : ''}
+                  </Text>
+                  <TouchableOpacity style={st.retryBtn} onPress={() => claim(item.id)}>
+                    <Text style={st.retryBtnText}>내 기록으로 전송</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+
               {failed.length > 0 && (
                 <Text style={st.sectionLabel}>실패함 — 확인 필요 ({failed.length}건)</Text>
               )}
               {failed.map((item) => (
                 <View key={item.id} style={st.itemCardFailed}>
                   <Text style={st.itemLabel}>{item.label}</Text>
-                  <Text style={st.itemMeta}>{KIND_LABEL[item.kind]} · {item.occurredAt}</Text>
-                  <Text style={st.itemError}>{item.lastError ?? '저장 실패'}</Text>
+                  <Text style={st.itemMeta}>
+                    {KIND_LABEL[item.kind]} · {item.occurredAt}
+                    {isQueueItemExpired(item) ? ' · 만료' : ''}
+                  </Text>
+                  <Text style={st.itemError}>{describeQueueError(item)}</Text>
                   <View style={st.itemBtnRow}>
                     <TouchableOpacity style={st.retryBtn} onPress={() => retry(item.id)}>
                       <Text style={st.retryBtnText}>다시 시도</Text>
@@ -90,6 +129,7 @@ export function OfflineQueueBadge() {
                   <Text style={st.itemMeta}>
                     {KIND_LABEL[item.kind]} · {item.occurredAt}
                     {item.attempts > 0 ? ` · 재시도 ${item.attempts}회` : ''}
+                    {isQueueItemExpired(item) ? ' · 만료' : ''}
                   </Text>
                   {!item.persisted && (
                     <Text style={st.itemWarn}>
@@ -133,6 +173,8 @@ const st = StyleSheet.create({
   modalCard: { backgroundColor: COLOR.surface, borderRadius: RADIUS.lg, padding: SPACE.xl, gap: SPACE.md, maxHeight: '80%' },
   modalTitle: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.text },
   modalSub: { fontSize: FONT.caption, color: COLOR.textMuted, lineHeight: 20 },
+  otherOwnerNotice: { fontSize: FONT.caption, color: COLOR.textSub, fontWeight: '600' },
+  expiredNotice: { fontSize: FONT.caption, color: COLOR.warning, fontWeight: '700' },
   list: { maxHeight: 360 },
 
   sectionLabel: { fontSize: FONT.label, fontWeight: '700', color: COLOR.textSub, marginTop: SPACE.sm },

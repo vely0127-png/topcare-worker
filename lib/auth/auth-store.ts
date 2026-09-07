@@ -36,6 +36,10 @@ interface AuthState {
   refresh: () => Promise<string | null>;
   /** 현재 세션의 정규화된 역할 키. 미인증이면 null. */
   roleKey: () => RoleKey | null;
+  /** 현재 세션 사용자 id. 미인증이면 null. 오프라인 큐 소유자 판정(offline-queue.ts, S-13)에 쓰인다. */
+  currentUserId: () => string | null;
+  /** 현재 세션 staffId. 미인증이거나 staffId가 없으면 null. */
+  currentStaffId: () => string | null;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -114,6 +118,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const role = get().session?.user.role;
     return role ? normalizeRole(role) : null;
   },
+
+  currentUserId: () => get().session?.user.id ?? null,
+  currentStaffId: () => get().session?.user.staffId ?? null,
 }));
 
 // ── API 클라이언트 연동 (모듈 로드 시 1회 등록) ──────────────

@@ -59,14 +59,19 @@ function RootNavigator() {
     );
   }
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="login" />
-      <Stack.Screen name="consent" />
-      <Stack.Screen name="beacon-register" />
-      <Stack.Screen name="(home)" />
-      <Stack.Screen name="(tabs)" />
-    </Stack>
+    <>
+      {/* 인증 가드 안에서만 렌더 — 로그아웃·로그인 화면에서는 절대 보이지 않는다(S-16).
+          큐 자체가 비어 있으면 배지는 어차피 아무것도 렌더링하지 않는다. */}
+      {status === 'authenticated' && <OfflineQueueBadge />}
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="login" />
+        <Stack.Screen name="consent" />
+        <Stack.Screen name="beacon-register" />
+        <Stack.Screen name="(home)" />
+        <Stack.Screen name="(tabs)" />
+      </Stack>
+    </>
   );
 }
 
@@ -118,8 +123,8 @@ export default function RootLayout() {
           <StatusBar style="light" />
           {/* 웹 QA 빌드에서만 보이는 안내 (실기기에선 렌더링 안 함) */}
           <WebQaBanner />
-          {/* 오프라인 큐에 대기 중인 기록이 있을 때만 보임 — 없으면 렌더링 안 함 */}
-          <OfflineQueueBadge />
+          {/* 오프라인 큐 배지는 RootNavigator 안(인증 가드 통과 후)에서만 렌더한다(S-16) —
+              여기 두면 로그아웃·로그인 화면에서도 보였다. */}
           {/* 비콘 스캐너는 앱 전체에서 하나. 로그인 상태 + 포그라운드면 자동으로 돈다
               (2026-08-06 대표 지시: "스캔은 앱 사용시 기본 설정") */}
           <BeaconProvider>
