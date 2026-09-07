@@ -57,6 +57,7 @@ import { kstHHMM } from '@/lib/hooks/useTodayTasks';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { QueuedOfflineError, type QueueItem } from '@/lib/queue/offline-queue';
 import { useOfflineQueue } from '@/lib/hooks/useOfflineQueue';
+import { measure } from '@/lib/measure/client';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 /**
@@ -189,6 +190,12 @@ export default function WorkboardScreen() {
   const [queuedKeys, setQueuedKeys] = useState<Set<string>>(new Set());
   const { pending: queuedPending } = useOfflineQueue();
 
+  // 실증 측정 — 공동 작업판 진입(ADR-001 §7 T1 과업의 2번째 단계, 홈 진입 다음).
+  useEffect(() => {
+    measure.navigate('workboard');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 큐에서 사라진 항목(전송 성공 · 409 제거)은 queuedKeys에서 빼고 판을 한 번 새로고침한다.
   // scheduleId(실계획)/재구성한 가상행 키로 매칭한다(queueItemRowKey).
   useEffect(() => {
@@ -288,6 +295,8 @@ export default function WorkboardScreen() {
       },
       {
         onSuccess: (created) => {
+          // 실증 측정 — 체크 성공(서버 200)까지의 stepIndex가 T1 뎁스(ADR-001 §7).
+          measure.save('workboard:check', { recordStatus: '작성완료' });
           if (created?.warning) RNAlert.alert('확인 필요', created.warning); // 서버 경고 숨기지 않기
           onDone?.();
         },
@@ -296,6 +305,8 @@ export default function WorkboardScreen() {
           // 시트를 닫고 대기 중임을 알린다(체크는 이미 로컬에 안전하게 남았다).
           if (e instanceof QueuedOfflineError) {
             setQueuedKeys((prev) => new Set(prev).add(row.schedule.id));
+            // 대기열행은 저장(save)이 아니다 — 아직 서버 200을 못 받았으므로 뎁스 집계에서 제외.
+            measure.step('workboard:check:queued');
             RNAlert.alert('대기 중', e.message);
             onDone?.();
             return;
@@ -315,6 +326,8 @@ export default function WorkboardScreen() {
    * (저장 후에 물으면 이미 만들어진 관찰기록의 유형을 고칠 API 가 없다 — 그래서 저장 전에 묻는다)
    */
   const tapRow = (row: Row) => {
+    // 실증 측정 — 행 탭(정상 체크 진입). residentId·성명은 담지 않는다(개인정보 0).
+    measure.step('workboard:row');
     if (!row.done && row.schedule.serviceType === 'defecation') {
       setBowelFor(row);
       return;
@@ -391,11 +404,14 @@ export default function WorkboardScreen() {
           source: 'manual',
           note: virtual ? r.schedule.note : null,
         });
+        // 실증 측정 — 일괄 완료도 체크 성공은 체크 성공이다(같은 체크 동작의 다른 진입 경로).
+        measure.save('workboard:check', { recordStatus: '작성완료' });
       } catch (e: any) {
         // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 실패가 아니다. 실패 목록에 넣지 않는다.
         if (e instanceof QueuedOfflineError) {
           queuedCount += 1;
           setQueuedKeys((prev) => new Set(prev).add(r.schedule.id));
+          measure.step('workboard:check:queued');
         } else {
           failures.push(`${r.schedule.residentName ?? '(이름 없음)'}: ${e?.message ?? '저장 실패'}`);
         }
@@ -505,7 +521,14 @@ export default function WorkboardScreen() {
                       {(saving || undoing) && <ActivityIndicator size="small" color={COLOR.primary} />}
                     </TouchableOpacity>
                     {!done && !isQueued ? (
-                      <TouchableOpacity style={st.exceptionBtn} onPress={() => setExceptionFor(row)}>
+                      <TouchableOpacity
+                        style={st.exceptionBtn}
+                        onPress={() => {
+                          // 실증 측정 — 예외 상세 시트 열기도 "행 상세 열기"로 센다.
+                          measure.step('workboard:row');
+                          setExceptionFor(row);
+                        }}
+                      >
                         <Text style={st.exceptionBtnText}>{sheetButtonFor(row.schedule.serviceType)}</Text>
                       </TouchableOpacity>
                     ) : done ? (

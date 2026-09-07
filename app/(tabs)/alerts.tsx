@@ -5,6 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { useAlerts, useAcknowledgeAlert, type AlertItem, type AlertSeverity } from '@/lib/hooks/useAlerts';
 import EmergencyAlertModal from '@/components/EmergencyAlertModal';
+import { measure } from '@/lib/measure/client';
 
 type SeverityConfig = { bg: string; border: string; text: string; label: string };
 const SEV_CFG: Record<AlertSeverity, SeverityConfig> = {
@@ -78,6 +79,12 @@ export default function AlertsScreen() {
 
   const { alerts, isLoading, isError, refetch, isFetching } = useAlerts(apiOpts);
   const ackMutation = useAcknowledgeAlert();
+
+  // 실증 측정 — 알림/경고 상세 진입(ADR-001 §7). 인지 시간 자체는 서버 Alert.createdAt→
+  // acknowledgedAt으로 이미 측정되므로 여기선 화면 진입만 남긴다(residentId·성명 없음).
+  useEffect(() => {
+    measure.navigate('alerts:detail');
+  }, []);
 
   useEffect(() => {
     const found = alerts.find(

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, AppState, type AppStateStatus } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import { BeaconProvider } from '@/lib/beacon/provider';
 import { WebQaBanner } from '@/components/WebQaBanner';
 import { OfflineQueueBadge } from '@/components/OfflineQueueBadge';
 import { initOfflineQueue } from '@/lib/queue/offline-queue';
+import { initMeasure, measure } from '@/lib/measure/client';
 import { keepBaseUrl } from '@/lib/ui/keep-base-url';
 
 // 웹 주소창의 /worker 접두사 유지 — expo-router 가 부팅 때 떼어버려서
@@ -45,6 +46,30 @@ function useAuthGuard() {
       router.replace(homeRouteForRole(session?.user.role));
     }
   }, [status, session, segments, router, consentGate.data]);
+
+  // 실증 측정 — 홈(역할별 큰 버튼 메뉴) 진입 시 T1 과업 시작(ADR-001 §7).
+  // 역할별 홈 화면 7개 각각에 심지 않고 여기 한 곳에서 잡는다 — segments[0] === '(home)'이면
+  // 어떤 역할의 홈이든 항상 이 그룹으로 들어온다. 개인정보 없음(화면 진입 사실만).
+  const segmentsRef = useRef(segments);
+  useEffect(() => { segmentsRef.current = segments; }, [segments]);
+
+  useEffect(() => {
+    if (status === 'authenticated' && segments[0] === '(home)') {
+      measure.startTask('T1', 'care');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, segments]);
+
+  useEffect(() => {
+    // 앱 포그라운드 복귀 — "지금 홈 화면인" 경우에만 T1을 새로 잰다(다른 작업 화면 도중
+    // 잠깐 앱을 껐다 켠 것까지 홈 진입으로 잘못 세지 않기 위해 segmentsRef로 현재 위치를 본다).
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active' && segmentsRef.current[0] === '(home)') {
+        measure.startTask('T1', 'care');
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   return status;
 }
@@ -92,6 +117,11 @@ export default function RootLayout() {
   // 로그인 여부와 무관하게 시작해도 안전하다: 큐에 항목이 없으면 아무 일도 하지 않는다.
   useEffect(() => {
     initOfflineQueue();
+  }, []);
+
+  // 실증 측정 — 백그라운드 전환 시 flush 감시만 여기서 초기화(과업 시작은 useAuthGuard가 담당).
+  useEffect(() => {
+    initMeasure();
   }, []);
 
   useEffect(() => {
