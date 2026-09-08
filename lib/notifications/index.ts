@@ -36,12 +36,25 @@ Notifications.setNotificationHandler({
 async function setupAndroidChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
+  // 잠금화면 표시 = PRIVATE (2026-09-07, 보안검토 S-02 앱 측 · 위젯 명세 A3 연동 요건 · 수용 기준 C-13):
+  // 잠긴 화면에는 앱 이름·건수 수준만 보이고 제목·본문(호실·이니셜·경고 종류)은 잠금 해제 후에 보인다.
+  // 서버가 title을 이미 "101호 고○○ — 혈압 위험"으로 마스킹하지만, 잠긴 폰에서 건강 정보가
+  // 읽히는 경로 자체를 막는 것이 원칙. Android는 채널 설정을 생성 시점에만 적용하므로
+  // 기존 설치(v2.2.0)에도 반영되게 채널을 지우고 다시 만든다(사용자 개별 소리 설정은 초기화됨 — 베타 전 1회 감수).
+  try {
+    await Notifications.deleteNotificationChannelAsync('topcare-alerts');
+    await Notifications.deleteNotificationChannelAsync('topcare-emergency');
+  } catch {
+    /* 채널이 없으면 무시 */
+  }
+
   await Notifications.setNotificationChannelAsync('topcare-alerts', {
     name: 'TopCare 알림',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#1A5276',
     sound: 'default',
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
 
   await Notifications.setNotificationChannelAsync('topcare-emergency', {
@@ -51,6 +64,7 @@ async function setupAndroidChannels(): Promise<void> {
     lightColor: '#DC2626',
     sound: 'default',
     bypassDnd: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
 }
 
