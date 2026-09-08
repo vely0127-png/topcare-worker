@@ -13,8 +13,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSession, useRole } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { AttendanceCard } from '@/components/AttendanceCard';
-import { WidgetPromoCard } from '@/components/WidgetPromoCard';
-import { WidgetPinButton } from '@/components/WidgetPinButton';
 import { getAppVersionLabel } from '@/lib/utils/app-version';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -117,9 +115,7 @@ export function RoleHome({
           </Text>
         ) : null}
 
-        {/* 홈 화면에 위젯 추가 버튼(W2) — 전용 설정 화면이 아직 없어 역할 홈 하단에 둔다
-            (components/WidgetPinButton.tsx 통합 지점 주석). Android 아니면 렌더 안 함. */}
-        <WidgetPinButton />
+        {/* (v2.3.0 릴리스 브랜치: 위젯 관련 버튼은 v2.4.0에서 — feature 브랜치에만 존재) */}
 
         {/* 앱 내 버전 표기(2026-09-08) — 값을 못 구하면 표기 자체를 숨긴다(가짜 값 금지) */}
         {versionLabel ? <Text style={styles.version}>{versionLabel}</Text> : null}
