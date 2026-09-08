@@ -13,6 +13,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSession, useRole } from '@/lib/hooks';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { AttendanceCard } from '@/components/AttendanceCard';
+import { WidgetPromoCard } from '@/components/WidgetPromoCard';
+import { WidgetPinButton } from '@/components/WidgetPinButton';
+import { getAppVersionLabel } from '@/lib/utils/app-version';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 export interface QuickAction {
@@ -40,6 +43,7 @@ export function RoleHome({
   const session = useSession();
   const role = useRole();
   const logout = useAuthStore((s) => s.logout);
+  const versionLabel = getAppVersionLabel();
 
   // href 없는 항목은 표시하지 않는다 — 눌러도 아무 일 없는 버튼은
   // 현장에서 "고장난 앱"으로 읽힌다(가짜 성공 금지 원칙과 같은 이유).
@@ -112,6 +116,13 @@ export function RoleHome({
             그 외 업무는 아직 앱에 없습니다. 웹(관리자 화면)에서 이용하세요.
           </Text>
         ) : null}
+
+        {/* 홈 화면에 위젯 추가 버튼(W2) — 전용 설정 화면이 아직 없어 역할 홈 하단에 둔다
+            (components/WidgetPinButton.tsx 통합 지점 주석). Android 아니면 렌더 안 함. */}
+        <WidgetPinButton />
+
+        {/* 앱 내 버전 표기(2026-09-08) — 값을 못 구하면 표기 자체를 숨긴다(가짜 값 금지) */}
+        {versionLabel ? <Text style={styles.version}>{versionLabel}</Text> : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -158,6 +169,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: FONT.label, color: COLOR.textMuted, marginTop: 2 },
   hintPrimary: { color: 'rgba(255,255,255,0.85)' },
   note: { fontSize: FONT.caption, color: COLOR.textFaint, lineHeight: 20 },
+  version: { fontSize: FONT.caption, color: COLOR.textFaint, textAlign: 'center', marginTop: SPACE.sm },
   badge: {
     minWidth: 34, height: 34, borderRadius: 17, paddingHorizontal: 8,
     backgroundColor: COLOR.danger, alignItems: 'center', justifyContent: 'center',
