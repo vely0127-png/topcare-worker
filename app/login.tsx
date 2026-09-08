@@ -15,10 +15,12 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { homeRouteForRole } from '@/lib/auth/roles';
 import { ApiError } from '@/lib/api/client';
+import { getAppVersionLabel } from '@/lib/utils/app-version';
 
 export default function LoginScreen() {
   const router = useRouter();
   const login = useAuthStore((s) => s.login);
+  const versionLabel = getAppVersionLabel();
 
   const [orgCode, setOrgCode] = useState('');
   const [email, setEmail] = useState('');
@@ -116,6 +118,9 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* 앱 내 버전 표기(2026-09-08) — 값을 못 구하면 표기 자체를 숨긴다(가짜 값 금지) */}
+      {versionLabel ? <Text style={styles.version}>{versionLabel}</Text> : null}
     </SafeAreaView>
   );
 }
@@ -144,4 +149,8 @@ const styles = StyleSheet.create({
   },
   loginButtonDisabled: { opacity: 0.6 },
   loginText: { color: '#fff', fontWeight: 'bold', fontSize: 19 },
+  version: {
+    position: 'absolute', bottom: 12, left: 0, right: 0,
+    textAlign: 'center', fontSize: 12, color: 'rgba(255,255,255,0.5)',
+  },
 });

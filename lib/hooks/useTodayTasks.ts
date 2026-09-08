@@ -23,6 +23,7 @@ import {
 import { useResidents } from './useResidents';
 import { useApiQuery } from './useApi';
 import { buildRoutineSchedules } from '../care/routine-rows';
+import { diaperSlots } from '../care/diaper-schedule';
 
 // ── KST 헬퍼 ──
 // 정본은 lib/utils/date. 여기서는 기존 사용처 호환을 위해 재수출만 한다(이원화 금지).
@@ -48,6 +49,21 @@ export function expandInterval(start: string, end: string, intervalMin: number):
     times.push(`${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
   }
   return times;
+}
+
+// Q5-03 (웹 components/care/ServiceTodoList.tsx 이식, 2026-09-08): expectedCount>=2 +
+// plannedStart/End가 있으면 intervalMin 등차 누적이 아니라 diaperSlots(균등 배분, 마지막
+// 슬롯=종료 시각 보장)로 전개한다. expectedCount가 없거나 1이면(체위변경 2시간 등 순수 고정
+// 주기) 기존 expandInterval 등차 전개를 유지한다 — 이쪽은 "횟수"가 아니라 "주기"가 정본이다.
+export function expandSchedule(
+  start: string,
+  end: string,
+  intervalMin: number | null | undefined,
+  expectedCount: number | null | undefined,
+): string[] {
+  if (expectedCount != null && expectedCount >= 2) return diaperSlots({ start, end, count: expectedCount });
+  if (!intervalMin || intervalMin < 30) return [start];
+  return expandInterval(start, end, intervalMin);
 }
 
 export interface DisplayRow {
@@ -111,8 +127,12 @@ export function useTodayTasks(): UseTodayTasksResult {
     // 1) 실제 개인 계획 (오늘 요일, 반복주기 전개)
     const real = schedules.filter((s) => s.dayOfWeek == null || s.dayOfWeek === todayDow);
     for (const s of real) {
-      const isInterval = Boolean(s.intervalMin && s.plannedStart && s.plannedEnd);
-      const times = isInterval ? expandInterval(s.plannedStart!, s.plannedEnd!, s.intervalMin!) : [s.plannedStart];
+      const isInterval = Boolean(
+        (s.intervalMin || (s.expectedCount != null && s.expectedCount >= 2)) && s.plannedStart && s.plannedEnd,
+      );
+      const times = isInterval
+        ? expandSchedule(s.plannedStart!, s.plannedEnd!, s.intervalMin, s.expectedCount)
+        : [s.plannedStart];
       for (const t of times) {
         out.push({
           key: isInterval ? `${s.id}|${t}` : s.id,
@@ -123,7 +143,9 @@ export function useTodayTasks(): UseTodayTasksResult {
           note: s.note ?? null,
           scheduleId: s.id,
           dayLabel: isInterval
-            ? `${s.intervalMin! >= 60 ? `${Math.floor(s.intervalMin! / 60)}시간` : `${s.intervalMin}분`} 주기`
+            ? (s.expectedCount != null && s.expectedCount >= 2
+                ? `${s.expectedCount}회 균등 배분`
+                : `${s.intervalMin! >= 60 ? `${Math.floor(s.intervalMin! / 60)}시간` : `${s.intervalMin}분`} 주기`)
             : s.dayOfWeek == null ? '매일' : `${DAY_LABELS[s.dayOfWeek]}요일`,
         });
       }
