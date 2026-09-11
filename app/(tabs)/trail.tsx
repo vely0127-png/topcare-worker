@@ -31,6 +31,7 @@ import { useTrail, SHORT_VISIT_SEC, type Visit } from '@/lib/hooks/useTrail';
 import { SERVICE_TYPES, serviceTypeLabel } from '@/lib/care/service-rules';
 import { toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
+import ServiceDetailSheet, { type ServiceDetailSheetResult } from '@/components/care/ServiceDetailSheet';
 
 const fmtDur = (sec: number | null): string => {
   if (sec == null) return '진행 중';
@@ -45,17 +46,29 @@ export default function TrailScreen() {
   } = useTrail();
 
   const [picking, setPicking] = useState<Visit | null>(null);
+  /** 2단계(#23, 2026-09-11) — 1단계(종류)를 고르면 여기 채워지고 상세 시트가 뜬다 */
+  const [pickedType, setPickedType] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // 짧은 접촉(1분 미만)은 목록에 넣지 않는다 — 묻지 않기로 했으므로.
   const rows = mainVisits;
 
-  const choose = async (serviceType: string) => {
+  const closePicking = () => {
+    setPicking(null);
+    setPickedType(null);
+  };
+
+  /**
+   * 2단계 등록(#23): 종류 확정 뒤 상세 시트에서 고른 selection(그룹키→선택 라벨)·비고까지
+   * 함께 보낸다. 실패 시 시트는 이미 닫혀 있고(아래 onSave) picking 은 남아 있어 1단계
+   * 종류 목록으로 자연히 돌아간다 — 다시 골라 재시도할 수 있다(가짜 성공 금지).
+   */
+  const choose = async (serviceType: string, detail?: { selection: Record<string, string[]>; note: string }) => {
     if (!picking) return;
     setSaving(true);
     try {
-      await register(picking, serviceType);
-      setPicking(null);
+      await register(picking, serviceType, detail);
+      closePicking();
     } catch (e) {
       // 가짜 성공 금지 — 실패는 실패로
       RNAlert.alert('등록 실패', (e as Error)?.message ?? '네트워크를 확인하세요');
@@ -122,7 +135,7 @@ export default function TrailScreen() {
               key={v.enterEventId}
               style={[styles.card, done && styles.cardDone]}
               disabled={done || !isToday}
-              onPress={() => setPicking(v)}
+              onPress={() => { setPickedType(null); setPicking(v); }}
             >
               <View style={styles.timeCol}>
                 <Text style={styles.time}>{toKSTTime(v.enterAt)}</Text>
@@ -169,8 +182,13 @@ export default function TrailScreen() {
         </Text>
       </ScrollView>
 
-      {/* 무얼 했는지 고르기 */}
-      <Modal visible={!!picking} transparent animationType="slide" onRequestClose={() => setPicking(null)}>
+      {/* 1단계 — 무얼 했는지(종류) 고르기. 종류를 고르면 2단계 상세 시트로 넘어간다(#23). */}
+      <Modal
+        visible={!!picking && !pickedType}
+        transparent
+        animationType="slide"
+        onRequestClose={closePicking}
+      >
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
@@ -186,7 +204,7 @@ export default function TrailScreen() {
                   key={s.value}
                   style={styles.typeBtn}
                   disabled={saving}
-                  onPress={() => void choose(s.value)}
+                  onPress={() => setPickedType(s.value)}
                 >
                   <Text style={styles.typeBtnText}>{s.label}</Text>
                 </TouchableOpacity>
@@ -195,7 +213,7 @@ export default function TrailScreen() {
 
             <TouchableOpacity
               style={styles.cancelBtn}
-              onPress={() => setPicking(null)}
+              onPress={closePicking}
               disabled={saving}
             >
               {saving ? (
@@ -207,6 +225,19 @@ export default function TrailScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* 2단계 — 서비스 상세 시트(#23). 취소하면 1단계 종류 목록으로 돌아간다. */}
+      <ServiceDetailSheet
+        visible={!!pickedType}
+        serviceType={pickedType}
+        title={picking && pickedType ? `${picking.residentName}님 · ${serviceTypeLabel(pickedType)}` : ''}
+        onCancel={() => setPickedType(null)}
+        onSave={(result: ServiceDetailSheetResult) => {
+          const t = pickedType;
+          setPickedType(null);
+          if (t) void choose(t, { selection: result.selection, note: result.note });
+        }}
+      />
     </SafeAreaView>
   );
 }

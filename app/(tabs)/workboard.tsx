@@ -61,51 +61,21 @@ import { QueuedOfflineError, type QueueItem } from '@/lib/queue/offline-queue';
 import { useOfflineQueue } from '@/lib/hooks/useOfflineQueue';
 import { measure } from '@/lib/measure/client';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
+import ServiceDetailSheet, { type ServiceDetailSheetResult } from '@/components/care/ServiceDetailSheet';
+import { composeSelectionNote, isExceptionNote } from '@/lib/data/service-detail-options';
 
 /**
- * 상세 시트 선택지 — 큰 버튼 하나로 끝난다(음성 메모는 다음 단계).
- * exception=true 는 '완료'가 아니라 주황 예외로 표시된다.
- * detail 은 서버가 만드는 관찰기록(CareRecord)에 담기는 값 —
- * 용어는 웹 배설관찰·목욕 입력 화면과 동일하게 맞췄다(공단 서식 용어 일관성).
+ * 서비스 상세 시트(#23, 2026-09-11) — 10종 전부 공용 ServiceDetailSheet 로 통일.
+ * 배변·목욕 전용 DETAIL_CONFIG(문구·예외 하드코딩)는 제거하고 lib/data/service-detail-options.ts
+ * (내장 사본, 웹 정본과 이름·shape 동일)로 옮겼다 — 문구·예외 판정은 회귀 없이 그대로다.
+ * 배변 유무 시트(BOWEL_OPTIONS)는 이 개편과 무관한 별도 1탭 기능이라 손대지 않는다.
  */
-type DetailOption = {
-  key: string;
-  label: string;
-  note: string;
-  exception: boolean;
-  detail?: Record<string, string>;
+/** 배변·목욕만 기존 버튼 문구를 유지(대표 확정 문구) — 그 외는 공용 '상세' */
+const DETAIL_BUTTON_LABEL: Record<string, string> = {
+  defecation: '배변·이상',
+  bathing: '상세·이상',
 };
-
-const COMMON_OPTIONS: DetailOption[] = [
-  { key: 'refused', label: '거부하심', note: '어르신이 거부하셔서 제공하지 못함', exception: true },
-  { key: 'partial', label: '절반만·일부만', note: '일부만 제공함', exception: true },
-  { key: 'issue', label: '이상 발견', note: '제공 중 이상 소견 — 간호 확인 필요', exception: true },
-];
-
-const DETAIL_CONFIG: Record<string, { button: string; title: string; options: DetailOption[] }> = {
-  defecation: {
-    button: '배변·이상',
-    title: '무엇을 확인했나요?',
-    options: [
-      { key: 'stool', label: '대변 있었음', note: '대변 확인', exception: false, detail: { type: '대변', amount: '보통', condition: '정상', skin: '정상' } },
-      { key: 'diarrhea', label: '설사', note: '설사 — 간호 확인 필요', exception: true, detail: { type: '대변', condition: '설사', skin: '정상' } },
-      { key: 'constipation', label: '변비 · 안 나옴', note: '배변 없음 — 변비 경향', exception: true, detail: { type: '배설없음', condition: '변비' } },
-      { key: 'blood', label: '혈변', note: '혈변 — 간호 즉시 확인 필요', exception: true, detail: { type: '대변', condition: '혈변' } },
-      { key: 'skin', label: '피부 발적 · 짓무름', note: '피부 발적·짓무름 — 간호 확인 필요', exception: true, detail: { skin: '발적' } },
-      COMMON_OPTIONS[0], COMMON_OPTIONS[1],
-    ],
-  },
-  bathing: {
-    button: '상세·이상',
-    title: '목욕은 어땠나요?',
-    options: [
-      { key: 'partial_bath', label: '부분목욕만', note: '부분목욕으로 제공', exception: false, detail: { bathType: '부분목욕', assistance: '부분보조', skin: '정상' } },
-      { key: 'bed_bath', label: '침상목욕', note: '침상목욕으로 제공', exception: false, detail: { bathType: '침상목욕', assistance: '완전보조', skin: '정상' } },
-      { key: 'skin', label: '피부 발적 · 상처 발견', note: '피부 발적·상처 발견 — 간호 확인 필요', exception: true, detail: { bathType: '전신목욕', skin: '발적' } },
-      ...COMMON_OPTIONS,
-    ],
-  },
-};
+const detailButtonLabelFor = (serviceType: string) => DETAIL_BUTTON_LABEL[serviceType] ?? '상세';
 
 /**
  * 라운드 배변 유무 — 정상 1탭 뒤에 붙는 **1탭 추가** 시트 (2026-09-03 vc9 / QA P2 제안)
@@ -127,18 +97,8 @@ const BOWEL_OPTIONS: BowelOption[] = [
   { key: 'none', label: '없음', type: '배설없음' },
 ];
 
-const optionsFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.options ?? COMMON_OPTIONS;
-const sheetTitleFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.title ?? '무슨 일이 있었나요?';
-const sheetButtonFor = (serviceType: string) => DETAIL_CONFIG[serviceType]?.button ?? '예외';
-
 /** 예외로 기록된 건인가 — note가 예외 문구와 일치하면 예외(완료와 시각적으로 구분) */
-const EXCEPTION_NOTES: string[] = Array.from(new Set(
-  [...COMMON_OPTIONS, ...Object.values(DETAIL_CONFIG).flatMap((c) => c.options)]
-    .filter((o) => o.exception)
-    .map((o) => o.note),
-));
-const isExceptionRecord = (p: ServiceProvision | null) =>
-  !!p?.note && EXCEPTION_NOTES.includes(p.note);
+const isExceptionRecord = (p: ServiceProvision | null) => isExceptionNote(p?.note);
 
 /**
  * 큐 항목(QueueItem) → 작업판 행 키(row.schedule.id) 역산 (2026-09-06 PD 검토 후속 ③).
@@ -193,8 +153,9 @@ export default function WorkboardScreen() {
   );
   const { mutate: createProvision, isPending: isSaving , mutateAsync: createProvisionAsync } = useCreateServiceProvision();
 
-  const [exceptionFor, setExceptionFor] = useState<Row | null>(null);
-  /** 배변 유무 시트(배변 케어 행을 탭했을 때) — 4버튼 + 건너뛰기 */
+  /** 서비스 상세 시트(#23) — [배변·이상]/[상세·이상]/[상세] 버튼으로 연다(10종 공용) */
+  const [detailFor, setDetailFor] = useState<Row | null>(null);
+  /** 배변 유무 시트(배변 케어 행을 탭했을 때) — 4버튼 + 건너뛰기 (상세 시트와 무관, 별도 유지) */
   const [bowelFor, setBowelFor] = useState<Row | null>(null);
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   /**
@@ -326,7 +287,13 @@ export default function WorkboardScreen() {
   /** 계획 시각(HH:MM) → 오늘 KST ISO. 가상행 매칭 키다 — 없으면 현재 시각으로 떨어진다. */
   const plannedIso = (hhmm: string | null) => (hhmm ? `${today}T${hhmm}:00+09:00` : nowIso());
 
-  const record = (row: Row, note?: string, detail?: Record<string, string>, onDone?: () => void) => {
+  const record = (
+    row: Row,
+    note?: string,
+    detail?: Record<string, string>,
+    onDone?: () => void,
+    selection?: Record<string, string[]>,
+  ) => {
     if (row.done) {
       RNAlert.alert('이미 기록됨', `${row.done.staffName ?? '다른 직원'}님이 이미 기록했습니다.`);
       return;
@@ -351,6 +318,8 @@ export default function WorkboardScreen() {
         note: note ?? (virtual ? row.schedule.note : null),
         // 관찰 세부 — 서버가 만드는 CareRecord 에 담긴다(기록 1건 원칙 유지)
         ...(detail ? { detail } : {}),
+        // 서비스 상세 시트(#23) 선택값 — 서버가 detail 을 조립하는 원천(레거시 detail 과 함께 보냄)
+        ...(selection ? { selection } : {}),
       },
       {
         onSuccess: (created) => {
@@ -596,12 +565,12 @@ export default function WorkboardScreen() {
                       <TouchableOpacity
                         style={st.exceptionBtn}
                         onPress={() => {
-                          // 실증 측정 — 예외 상세 시트 열기도 "행 상세 열기"로 센다.
+                          // 실증 측정 — 상세 시트 열기도 "행 상세 열기"로 센다.
                           measure.step('workboard:row');
-                          setExceptionFor(row);
+                          setDetailFor(row);
                         }}
                       >
-                        <Text style={st.exceptionBtnText}>{sheetButtonFor(row.schedule.serviceType)}</Text>
+                        <Text style={st.exceptionBtnText}>{detailButtonLabelFor(row.schedule.serviceType)}</Text>
                       </TouchableOpacity>
                     ) : done ? (
                       // ① 되돌리기 — 내가 기록한 건만 (남의 기록은 서버 이전에 화면에서 막는다)
@@ -625,33 +594,20 @@ export default function WorkboardScreen() {
         })}
       </ScrollView>
 
-      {/* ── 예외 기록 시트 — 큰 버튼 3종, 질문 하나 (원칙 5) ── */}
-      <Modal visible={!!exceptionFor} transparent animationType="fade" onRequestClose={() => setExceptionFor(null)}>
-        <View style={st.modalBg}>
-          <View style={st.modalCard}>
-            <Text style={st.modalTitle}>
-              {exceptionFor?.schedule.residentName} — {exceptionFor ? serviceTypeLabel(exceptionFor.schedule.serviceType) : ''}
-            </Text>
-            <Text style={st.modalSub}>{exceptionFor ? sheetTitleFor(exceptionFor.schedule.serviceType) : '무슨 일이 있었나요?'}</Text>
-            {(exceptionFor ? optionsFor(exceptionFor.schedule.serviceType) : COMMON_OPTIONS).map((ex) => (
-              <TouchableOpacity
-                key={ex.key}
-                style={[st.modalOption, !ex.exception && st.modalOptionNormal]}
-                onPress={() => {
-                  const row = exceptionFor;
-                  setExceptionFor(null);
-                  if (row) record(row, ex.note, ex.detail);
-                }}
-              >
-                <Text style={[st.modalOptionText, !ex.exception && st.modalOptionTextNormal]}>{ex.label}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={st.modalCancel} onPress={() => setExceptionFor(null)}>
-              <Text style={st.modalCancelText}>닫기</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* ── 서비스 상세 시트(#23) — 그룹별 칩 선택 + 비고, 10종 공용 ── */}
+      <ServiceDetailSheet
+        visible={!!detailFor}
+        serviceType={detailFor?.schedule.serviceType ?? null}
+        title={detailFor ? `${detailFor.schedule.residentName ?? ''} — ${serviceTypeLabel(detailFor.schedule.serviceType)}` : ''}
+        onCancel={() => setDetailFor(null)}
+        onSave={(result: ServiceDetailSheetResult) => {
+          const row = detailFor;
+          setDetailFor(null);
+          if (!row) return;
+          const { note, detail } = composeSelectionNote(row.schedule.serviceType, result.selection, result.note);
+          record(row, note ?? undefined, detail, undefined, result.selection);
+        }}
+      />
 
       {/* ── 배변 유무 시트 — 큰 카드 4개, 탭 즉시 닫히고 저장 (2026-09-03 vc9) ── */}
       <Modal visible={!!bowelFor} transparent animationType="fade" onRequestClose={() => setBowelFor(null)}>
@@ -732,8 +688,6 @@ const st = StyleSheet.create({
   rowName: { fontSize: FONT.body, fontWeight: '700', color: COLOR.text },
   rowNameDone: { color: COLOR.textSub },
   rowService: { fontSize: FONT.caption, color: COLOR.textMuted, marginTop: 2 },
-  modalOptionNormal: { borderColor: COLOR.success },
-  modalOptionTextNormal: { color: COLOR.success },
   exceptionBtn: { minWidth: 78, minHeight: TOUCH.min, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.caution, alignItems: 'center', justifyContent: 'center', backgroundColor: COLOR.surface },
   exceptionBtnText: { fontSize: FONT.label, fontWeight: '700', color: COLOR.caution },
 
@@ -744,8 +698,6 @@ const st = StyleSheet.create({
   modalCard: { backgroundColor: COLOR.surface, borderRadius: RADIUS.lg, padding: SPACE.xl, gap: SPACE.md },
   modalTitle: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.text },
   modalSub: { fontSize: FONT.label, color: COLOR.textSub },
-  modalOption: { minHeight: TOUCH.large, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.borderStrong, alignItems: 'center', justifyContent: 'center', backgroundColor: COLOR.bg },
-  modalOptionText: { fontSize: FONT.body, fontWeight: '700', color: COLOR.text },
   modalCancel: { minHeight: TOUCH.min, alignItems: 'center', justifyContent: 'center' },
   modalCancelText: { fontSize: FONT.body, color: COLOR.textMuted, fontWeight: '600' },
 

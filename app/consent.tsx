@@ -3,7 +3,7 @@
  * 로그인 후 개인정보 수집·이용 동의(worker_privacy) 미서명이면 이 화면으로 강제 이동
  * (_layout useAuthGuard). 문안은 서버(GET /api/consent)가 정본 — 버전 개정 시 자동 재동의.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator} from 'react-native';
 import { Alert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,6 +30,20 @@ export default function ConsentScreen() {
   const logout = useAuthStore((s) => s.logout);
   const [signature, setSignature] = useState<SignatureData | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // 서명 후 제출 버튼(#22, 2026-09-11) — 서명이 막 생긴 순간(null→값)에만 스크롤,
+  // 매 스트로크마다 스크롤하면 서명 중 화면이 튀어 산만해진다.
+  const scrollRef = useRef<ScrollView>(null);
+  const hadSignatureRef = useRef(false);
+
+  const handleSignatureChange = (data: SignatureData | null) => {
+    setSignature(data);
+    if (data && !hadSignatureRef.current) {
+      hadSignatureRef.current = true;
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    } else if (!data) {
+      hadSignatureRef.current = false;
+    }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['consent', CONSENT_TYPE],
@@ -72,7 +86,7 @@ export default function ConsentScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>{data?.text.title ?? '개인정보 수집·이용 동의'}</Text>
         <Text style={styles.version}>문안 버전 {data?.text.version}</Text>
         <View style={styles.bodyBox}>
@@ -82,8 +96,16 @@ export default function ConsentScreen() {
         <Text style={styles.signLabel}>
           서명 {session?.user.name ? `(${session.user.name})` : ''}
         </Text>
-        <SignaturePad onChange={setSignature} />
+        <SignaturePad onChange={handleSignatureChange} />
 
+        <TouchableOpacity style={styles.logoutBtn} onPress={() => void logout()}>
+          <Text style={styles.logoutText}>동의하지 않고 로그아웃</Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      {/* 제출 버튼(#22, 2026-09-11) — 스크롤 밖 하단 고정. 서명 전에는 이유를 알려준다. */}
+      <View style={styles.bottomBar}>
+        {!signature ? <Text style={styles.bottomHint}>서명 후 제출할 수 있습니다</Text> : null}
         <TouchableOpacity
           style={[styles.submitBtn, (!signature || submitting) && styles.btnDisabled]}
           disabled={!signature || submitting}
@@ -91,11 +113,7 @@ export default function ConsentScreen() {
         >
           <Text style={styles.submitText}>{submitting ? '제출 중…' : '동의하고 서명 제출'}</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.logoutBtn} onPress={() => void logout()}>
-          <Text style={styles.logoutText}>동의하지 않고 로그아웃</Text>
-        </TouchableOpacity>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -103,13 +121,19 @@ export default function ConsentScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 20, paddingBottom: 48 },
+  scroll: { padding: 20, paddingBottom: 24 },
   title: { fontSize: 22, fontWeight: '800', color: '#0f172a', marginTop: 8 },
   version: { fontSize: 15, color: '#94a3b8', marginTop: 4, marginBottom: 14 },
   bodyBox: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#e2e8f0' },
   body: { fontSize: 16, lineHeight: 22, color: '#334155' },
   signLabel: { fontSize: 16, fontWeight: '700', color: '#0f172a', marginTop: 20, marginBottom: 8 },
-  submitBtn: { backgroundColor: '#1A5276', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
+  // 제출 버튼(#22) — 스크롤 밖 하단 고정 바
+  bottomBar: {
+    padding: 16, paddingTop: 10, backgroundColor: '#fff',
+    borderTopWidth: 1, borderTopColor: '#e2e8f0',
+  },
+  bottomHint: { fontSize: 14, color: '#94a3b8', textAlign: 'center', marginBottom: 8 },
+  submitBtn: { backgroundColor: '#1A5276', borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
   btnDisabled: { opacity: 0.4 },
   submitText: { color: '#fff', fontSize: 18, fontWeight: '700' },
   logoutBtn: { alignItems: 'center', paddingVertical: 14, marginTop: 4 },

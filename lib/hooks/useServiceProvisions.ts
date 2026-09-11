@@ -91,6 +91,11 @@ export interface CreateServiceProvisionVars {
    * 허용 키: type·amount·condition·skin·note·bathType·assistance (서버 화이트리스트)
    */
   detail?: Record<string, string>;
+  /**
+   * 서비스 상세 시트(#23, 2026-09-11) 선택값 — 그룹키 → 선택 라벨 배열.
+   * 서버가 detail 을 조립하는 데 쓴다(레거시 detail 키와 함께 보낼 수 있다).
+   */
+  selection?: Record<string, string[]>;
 }
 
 export function useCreateServiceProvision() {

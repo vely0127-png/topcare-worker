@@ -16,6 +16,7 @@ import { apiFetch } from '../api/client';
 import { useAuthStore } from '../auth/auth-store';
 import { postPresenceEvent } from './usePresence';
 import { getKSTToday } from '../utils/date';
+import { composeSelectionNote } from '../data/service-detail-options';
 
 /** 짧은 방문 기준 — 이보다 짧으면 목록에서 접어둔다(숨기지 않고 건수는 보여줌) */
 export const SHORT_VISIT_SEC = 60;
@@ -150,9 +151,19 @@ export function useTrail(date?: string) {
 
   const isToday = day === getKSTToday();
 
-  /** 방문 1건에 서비스 지정 → 서버가 초안 생성 */
+  /**
+   * 방문 1건에 서비스 지정 → 서버가 초안 생성.
+   * detailInput(#23, 2026-09-11) — 서비스 종류 확정 뒤 ServiceDetailSheet 에서 고른
+   * selection(그룹키→선택 라벨)·비고. composeSelectionNote 로 사람이 읽는 note/레거시
+   * detail 을 함께 합성해 보낸다 — 서버가 selection 조립을 아직 못 하더라도 기록이 비지 않는다.
+   */
   const register = useCallback(
-    async (visit: Visit, serviceType: string) => {
+    async (
+      visit: Visit,
+      serviceType: string,
+      detailInput?: { selection: Record<string, string[]>; note: string },
+    ) => {
+      const composed = composeSelectionNote(serviceType, detailInput?.selection ?? {}, detailInput?.note);
       await postPresenceEvent({
         eventType: 'enter',
         mode: 'provision-only',
@@ -161,6 +172,9 @@ export function useTrail(date?: string) {
         serviceType,
         occurredAt: new Date(visit.enterAt).toISOString(),
         endAt: visit.exitAt != null ? new Date(visit.exitAt).toISOString() : null,
+        ...(detailInput?.selection ? { selection: detailInput.selection } : {}),
+        ...(composed.note ? { note: composed.note } : {}),
+        ...(composed.detail ? { detail: composed.detail } : {}),
       });
       await qc.invalidateQueries({ queryKey: ['trail'] });
       await qc.invalidateQueries({ queryKey: ['service-provisions'] });

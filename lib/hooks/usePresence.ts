@@ -33,6 +33,16 @@ export interface PresencePostVars {
   /** provision-only 전용 — 이미 끝난 방문이므로 종료 시각도 함께 확정.
    *  안 주면 초안이 열린 채 남아 다음 exit 이 엉뚱하게 마감한다. */
   endAt?: string | null;
+  /**
+   * 서비스 상세 시트(#23, 2026-09-11) — 그룹키 → 선택 라벨 배열. 서버가 detail 을
+   * 조립하는 원천(웹 /api/care/service-provisions 계약과 같은 키). presence 라우트가
+   * 아직 조립을 못 하더라도 note 는 클라이언트가 조합해 함께 보낸다(안전망).
+   */
+  selection?: Record<string, string[]>;
+  /** composeSelectionNote 가 조합한 비고(사람이 읽는 문구) */
+  note?: string | null;
+  /** 레거시 detail 키(배변·목욕 등 canned 매핑) — selection 조립 전 안전망 */
+  detail?: Record<string, string>;
 }
 
 export interface PresencePostResult {
