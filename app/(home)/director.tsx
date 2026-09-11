@@ -10,6 +10,8 @@ const ACTIONS: QuickAction[] = [
   { key: 'attendance', label: '근태(비콘)', href: '/(tabs)/proximity', hint: 'BLE 출퇴근', icon: 'bluetooth-connect' },
   // vc9: 프로그램 진행 여부 확인(운영 관리 축) — 기록 주체는 사회복지사가 정본
   { key: 'programs', label: '오늘 프로그램', href: '/(tabs)/programs', hint: '예정·기록 여부', icon: 'account-group' },
+  // 2026-09-11 급여명세서(전자로 진행, 대표 결정) — 확정본만 표시
+  { key: 'payroll', label: '급여명세서', href: '/(tabs)/payroll', hint: '월별 지급·공제 내역', icon: 'cash-multiple' },
   // 앱 미구현 — 웹에서
   { key: 'residents', label: '입소자 관리', hint: '입퇴소·배정' },
   { key: 'staff', label: '직원/근무', hint: '배치·근태' },

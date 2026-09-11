@@ -18,6 +18,8 @@ export default function NurseHome() {
     { key: 'health-log', label: '건강 기록', href: '/(tabs)/health-log', hint: '식사 섭취', icon: 'food-apple' },
     { key: 'observation', label: '관찰 일지', href: '/(tabs)/observation', icon: 'eye-check' },
     { key: 'alerts', label: '알림', href: '/(tabs)/alerts', icon: 'bell' },
+    // 2026-09-11 급여명세서(전자로 진행, 대표 결정) — 확정본만 표시
+    { key: 'payroll', label: '급여명세서', href: '/(tabs)/payroll', hint: '월별 지급·공제 내역', icon: 'cash-multiple' },
   ], [pendingCount]);
 
   return <RoleHome title="간호 업무" actions={actions} />;

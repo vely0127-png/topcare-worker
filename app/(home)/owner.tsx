@@ -11,6 +11,8 @@ const ACTIONS: QuickAction[] = [
   { key: 'attendance', label: '근태(비콘)', href: '/(tabs)/proximity', hint: 'BLE 출퇴근', icon: 'bluetooth-connect' },
   // vc9: 시설장은 "오늘 프로그램이 돌았나"를 확인하는 쪽 — 기록도 대신 할 수 있다(대리 기록도 기록이다)
   { key: 'programs', label: '오늘 프로그램', href: '/(tabs)/programs', hint: '예정·기록 여부', icon: 'account-group' },
+  // 2026-09-11 급여명세서(전자로 진행, 대표 결정) — 확정본만 표시
+  { key: 'payroll', label: '급여명세서', href: '/(tabs)/payroll', hint: '월별 지급·공제 내역', icon: 'cash-multiple' },
   // 아래는 앱 미구현 — href 없으면 홈에 표시되지 않는다(죽은 카드 금지)
   { key: 'residents', label: '입소자 요약', hint: '정원/현원/위험군' },
   { key: 'staff', label: '직원 현황', hint: '근무/출퇴근' },

@@ -12,3 +12,4 @@ export * from './useBeaconServiceLog';
 export * from './useObservationCards';
 export * from './useAttendance';
 export * from './usePrograms';
+export * from './usePayroll';

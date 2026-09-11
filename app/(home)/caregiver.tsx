@@ -19,6 +19,8 @@ export default function CaregiverHome() {
     { key: 'beacon', label: '자동 기록', href: '/(tabs)/service-log', hint: '비콘 근접 자동기록', icon: 'clipboard-check' },
     { key: 'proximity', label: '비콘 근접', href: '/(tabs)/proximity', hint: '현재 위치·근접 인증', icon: 'bluetooth-connect' },
     { key: 'alerts', label: '알림', href: '/(tabs)/alerts', icon: 'bell' },
+    // 2026-09-11 급여명세서(전자로 진행, 대표 결정) — 확정본만 표시
+    { key: 'payroll', label: '급여명세서', href: '/(tabs)/payroll', hint: '월별 지급·공제 내역', icon: 'cash-multiple' },
   ], [pendingCount]);
 
   return <RoleHome title="요양보호 업무" actions={actions} />;

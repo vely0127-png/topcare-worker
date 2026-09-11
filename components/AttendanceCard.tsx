@@ -34,6 +34,7 @@ import { useConsentGate } from '@/lib/hooks/useConsentGate';
 import { acquireLocationOnce } from '@/lib/attendance/location';
 import { loadAutoCheckinDate, saveAutoCheckinDate } from '@/lib/attendance/day-memo';
 import { QueuedOfflineError } from '@/lib/queue/offline-queue';
+import { ConfirmModal } from '@/components/common/ConfirmModal';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -74,6 +75,9 @@ export function AttendanceCard() {
   const [locationNote, setLocationNote] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'checkin' | 'checkout' | 'geo'>(null);
+  // 퇴근 확인 모달(2026-09-11 대표 지시 "자동화 동등성" — 앱 자체 모달, 네이티브 alert 금지).
+  // 사람이 누르는 유일한 동작이라 실수 탭으로 바로 전송되지 않게 한 번 더 확인한다.
+  const [confirmingCheckout, setConfirmingCheckout] = useState(false);
   const autoRunRef = useRef(false);
 
   const record = attendanceQ.data?.items?.[0] ?? null;
@@ -238,11 +242,29 @@ export function AttendanceCard() {
         </View>
         {busy ? <ActivityIndicator size="small" color={COLOR.primary} /> : null}
         {checkedIn && !checkedOut ? (
-          <TouchableOpacity style={st.checkoutBtn} disabled={!!busy || !consentCleared} onPress={() => void checkout()}>
+          <TouchableOpacity
+            style={st.checkoutBtn}
+            disabled={!!busy || !consentCleared}
+            onPress={() => setConfirmingCheckout(true)}
+          >
             <Text style={st.checkoutText}>퇴근</Text>
           </TouchableOpacity>
         ) : null}
       </View>
+
+      <ConfirmModal
+        visible={confirmingCheckout}
+        title="퇴근을 기록할까요?"
+        message="지금 시각(서버 수신 시각 기준)으로 퇴근을 기록합니다. 기록 후에는 관리자만 정정할 수 있습니다."
+        confirmText="퇴근 기록"
+        cancelText="취소"
+        busy={busy === 'checkout'}
+        onCancel={() => setConfirmingCheckout(false)}
+        onConfirm={() => {
+          setConfirmingCheckout(false);
+          void checkout();
+        }}
+      />
 
       {/* 동의 확인이 안 되면 근태가 아예 안 돈다 — 조용히 비워두지 않고 이유를 적는다 */}
       {consentQ.isError ? (
