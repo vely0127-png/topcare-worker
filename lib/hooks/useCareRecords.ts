@@ -26,6 +26,9 @@ export interface CareRecord {
   staffId: string | null;
   staffName: string;
   content: string | null;
+  // 관찰3단 §5: 웹 GET /api/care/records가 병행 제공하는 파싱 결과(Q5-13 규약) — 있으면
+  // 화면에서 content를 다시 파싱하지 않고 그대로 쓴다(lib/care/record-content.ts 참고).
+  contentObj?: Record<string, any> | null;
   severity: string | null;
   createdAt: string;
 }
