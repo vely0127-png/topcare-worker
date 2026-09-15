@@ -19,6 +19,8 @@ import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 export interface ServiceDetailSheetResult {
   selection: Record<string, string[]>;
+  /** 숫자 입력 그룹 값(정본 group.input, 예 ml) — 비운 칸은 키 없음(측정 안 한 것을 0으로 창작하지 않음) */
+  inputs: Record<string, number>;
   note: string;
   hasException: boolean;
 }
@@ -38,6 +40,7 @@ export default function ServiceDetailSheet({ visible, serviceType, title, onCanc
   const spec = serviceType ? specFor(serviceType) : null;
 
   const [selection, setSelection] = useState<Record<string, string[]>>({});
+  const [inputs, setInputs] = useState<Record<string, string>>({});
   const [note, setNote] = useState('');
   const [blockedGroup, setBlockedGroup] = useState<string | null>(null);
 
@@ -45,6 +48,7 @@ export default function ServiceDetailSheet({ visible, serviceType, title, onCanc
   useEffect(() => {
     if (visible) {
       setSelection({});
+      setInputs({});
       setNote('');
       setBlockedGroup(null);
     }
@@ -76,7 +80,25 @@ export default function ServiceDetailSheet({ visible, serviceType, title, onCanc
         return;
       }
     }
-    onSave({ selection, note, hasException });
+    // 숫자 입력 그룹: 범위 안의 숫자만 넘긴다(빈 칸·범위 밖은 키 없음)
+    const numInputs: Record<string, number> = {};
+    for (const g of spec?.groups ?? []) {
+      if (!g.input || g.input.kind !== 'number') continue;
+      if (!isInputShown(g)) continue;
+      const raw = (inputs[g.key] ?? '').trim();
+      if (!raw) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < (g.input.min ?? 0) || n > (g.input.max ?? 1_000_000)) continue;
+      numInputs[g.key] = Math.round(n);
+    }
+    onSave({ selection, inputs: numInputs, note, hasException });
+  };
+
+  // showWhen: 지정 그룹의 현재 선택 라벨이 anyOf 안에 있을 때만 숫자 칸을 그린다
+  const isInputShown = (g: { input?: { showWhen?: { groupKey: string; anyOf: string[] } } }) => {
+    const sw = g.input?.showWhen;
+    if (!sw) return true;
+    return (selection[sw.groupKey] ?? []).some((label) => sw.anyOf.includes(label));
   };
 
   return (
@@ -97,12 +119,26 @@ export default function ServiceDetailSheet({ visible, serviceType, title, onCanc
             )}
             {fallbackNotice && <Text style={st.fallbackNotice}>{fallbackNotice}</Text>}
 
-            {spec?.groups.map((g) => (
+            {spec?.groups.filter((g) => !g.input || isInputShown(g)).map((g) => (
               <View key={g.key} style={st.group}>
                 <Text style={st.groupLabel}>
                   {g.label}
                   {g.required ? ' *' : ''}
                 </Text>
+                {g.input?.kind === 'number' && (
+                  <View style={st.numberRow}>
+                    <TextInput
+                      style={st.numberInput}
+                      keyboardType="number-pad"
+                      placeholder={g.input.placeholder ?? ''}
+                      placeholderTextColor={COLOR.textFaint}
+                      value={inputs[g.key] ?? ''}
+                      onChangeText={(v) => setInputs((prev) => ({ ...prev, [g.key]: v.replace(/[^0-9]/g, '').slice(0, 5) }))}
+                      maxLength={5}
+                    />
+                    <Text style={st.numberUnit}>{g.input.unit}</Text>
+                  </View>
+                )}
                 <View style={st.chipsRow}>
                   {g.options.map((o) => {
                     const selected = (selection[g.key] ?? []).includes(o.label);
@@ -170,6 +206,13 @@ const st = StyleSheet.create({
   chipText: { fontSize: FONT.label, fontWeight: '600', color: COLOR.text },
   chipTextSelected: { color: '#fff' },
   blockedText: { fontSize: FONT.caption, color: COLOR.danger, marginTop: SPACE.xs, fontWeight: '600' },
+
+  numberRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, marginBottom: SPACE.xs },
+  numberInput: {
+    flex: 1, minHeight: 52, borderWidth: 1.5, borderColor: COLOR.borderStrong, borderRadius: RADIUS.md,
+    paddingHorizontal: SPACE.md, fontSize: FONT.heading, fontWeight: '700', color: COLOR.text, backgroundColor: COLOR.bg,
+  },
+  numberUnit: { fontSize: FONT.body, fontWeight: '700', color: COLOR.textSub, minWidth: 32 },
 
   noteLabel: { fontSize: FONT.label, fontWeight: '700', color: COLOR.textSub, marginTop: SPACE.sm, marginBottom: SPACE.xs },
   noteInput: {

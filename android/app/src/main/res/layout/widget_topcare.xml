@@ -26,7 +26,7 @@
             android:text="@string/app_name"
             android:textColor="@color/colorPrimaryDark"
             android:textStyle="bold"
-            android:textSize="13sp"
+            android:textSize="15sp"
             android:singleLine="true" />
 
         <TextView
@@ -34,7 +34,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="#8A8A8A"
-            android:textSize="11sp"
+            android:textSize="13sp"
             android:singleLine="true"
             tools:text="10:32 기준" />
     </LinearLayout>
@@ -46,7 +46,7 @@
         android:layout_weight="1"
         android:gravity="center"
         android:textColor="#8A8A8A"
-        android:textSize="13sp"
+        android:textSize="15sp"
         android:visibility="gone"
         tools:text="로그인 필요" />
 
@@ -66,13 +66,13 @@
             android:text="@string/widget_section_alerts"
             android:textColor="@color/colorPrimary"
             android:textStyle="bold"
-            android:textSize="12sp" />
+            android:textSize="15sp" />
 
         <TextView
             android:id="@+id/alert_row_1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end"
             android:visibility="gone"
@@ -82,7 +82,7 @@
             android:id="@+id/alert_row_2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end"
             android:visibility="gone"
@@ -92,7 +92,7 @@
             android:id="@+id/alert_row_3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end"
             android:visibility="gone"
@@ -107,13 +107,13 @@
             android:text="@string/widget_section_services"
             android:textColor="@color/colorPrimary"
             android:textStyle="bold"
-            android:textSize="12sp" />
+            android:textSize="15sp" />
 
         <TextView
             android:id="@+id/service_row_1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end"
             android:visibility="gone"
@@ -123,7 +123,7 @@
             android:id="@+id/service_row_2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end"
             android:visibility="gone"
@@ -133,7 +133,7 @@
             android:id="@+id/service_row_3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end"
             android:visibility="gone"
@@ -144,7 +144,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#8A8A8A"
-            android:textSize="11sp"
+            android:textSize="13sp"
             tools:text="완료 3/9" />
 
         <!-- 업무 지시(건수만) -->
@@ -155,7 +155,7 @@
             android:layout_marginTop="6dp"
             android:textColor="@color/colorPrimary"
             android:textStyle="bold"
-            android:textSize="12sp"
+            android:textSize="15sp"
             tools:text="업무 지시 미완료 2건" />
     </LinearLayout>
 
@@ -172,7 +172,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:textColor="#B45309"
-            android:textSize="11sp"
+            android:textSize="13sp"
             android:visibility="gone"
             tools:text="미전송 2건" />
 
@@ -182,7 +182,7 @@
             android:layout_height="wrap_content"
             android:text="@string/widget_open_app"
             android:textColor="@android:color/white"
-            android:textSize="12sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:background="@drawable/widget_button_bg"
             android:paddingLeft="12dp"

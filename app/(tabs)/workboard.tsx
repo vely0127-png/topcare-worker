@@ -605,7 +605,10 @@ export default function WorkboardScreen() {
           setDetailFor(null);
           if (!row) return;
           const { note, detail } = composeSelectionNote(row.schedule.serviceType, result.selection, result.note);
-          record(row, note ?? undefined, detail, undefined, result.selection);
+          // 숫자 입력 그룹(배설 측정량 ml 등)은 detail에 문자열로 실어 보낸다 — 서버(service-provisions pickDetail)가 정수로 저장
+          const numInputs = Object.fromEntries(Object.entries(result.inputs ?? {}).map(([k, v]) => [k, String(v)]));
+          const merged = Object.keys(numInputs).length ? { ...(detail ?? {}), ...numInputs } : detail;
+          record(row, note ?? undefined, merged, undefined, result.selection);
         }}
       />
 

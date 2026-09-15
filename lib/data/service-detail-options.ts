@@ -31,6 +31,8 @@ export interface ServiceDetailGroup {
   /** true면 저장 전 이 그룹에서 최소 1개 선택 필수 */
   required?: boolean;
   options: ServiceDetailOption[];
+  /** 숫자 입력 그룹(웹 정본 2026-09-15a, 배설 측정량 ml). 있으면 options는 []이고 칩 대신 숫자 칸을 그린다. */
+  input?: { kind: 'number'; unit: string; min?: number; max?: number; placeholder?: string; showWhen?: { groupKey: string; anyOf: string[] } };
 }
 
 export interface ServiceDetailSpec {
@@ -159,6 +161,11 @@ export const BUILTIN_SERVICE_DETAIL_SPECS: BuiltinServiceDetailSpec[] = [
           { key: 'refused', label: '거부하심', exception: true, note: '어르신이 거부하셔서 제공하지 못함' },
           { key: 'partial', label: '절반만·일부만', exception: true, note: '일부만 제공함' },
         ],
+      },
+      {
+        // 설계 TopCare_배설기록_측정량ml_설계_20260915 ①: 소변량·장루 배출량(측정한 경우만). 오프라인 폴백에서는 항상 표시.
+        key: 'ml', label: '측정량(ml)', multi: false, options: [],
+        input: { kind: 'number', unit: 'ml', min: 0, max: 5000, placeholder: '소변량·장루 배출량(측정 시)' },
       },
     ],
   },
