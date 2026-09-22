@@ -86,14 +86,14 @@ export default function HealthLogScreen() {
             <View style={styles.mealTable}>
               {/* 헤더 */}
               <View style={styles.mealHeader}>
-                <Text style={[styles.mealCell, styles.nameCell, styles.headerText]}>입주자</Text>
+                <Text style={[styles.mealCell, styles.nameCell, styles.headerText]}>입소자</Text>
                 {MEAL_TYPES.map(m => (
                   <Text key={m} style={[styles.mealCell, styles.headerText]}>{MEAL_LABELS[m]}</Text>
                 ))}
               </View>
               {residents.length === 0 && (
                 <View style={{ padding: 16, alignItems: 'center' }}>
-                  <Text style={{ color: '#9CA3AF' }}>입소 중인 입주자가 없습니다</Text>
+                  <Text style={{ color: '#9CA3AF' }}>입소 중인 입소자가 없습니다</Text>
                 </View>
               )}
               {residents.map(r => (

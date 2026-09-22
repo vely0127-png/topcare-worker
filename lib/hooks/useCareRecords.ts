@@ -6,6 +6,7 @@ import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useApiListQuery } from './useApi';
 import { ApiError } from '../api/client';
 import { postWithQueue } from '../queue/offline-queue';
+import { useAuthStore } from '../auth/auth-store';
 
 /** 큐 배지 목록에 보일 한 줄 — recordType 코드값을 사람이 읽는 말로 */
 const RECORD_TYPE_LABEL: Record<string, string> = {
@@ -49,12 +50,14 @@ export function useCareRecords(params?: {
   date?: string;
   limit?: number;
 }) {
+  // H-1(2026-09-23): 사용자 전환 시 캐시가 섞이지 않게 queryKey에 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   const qs = new URLSearchParams({ limit: String(params?.limit ?? 50) });
   if (params?.residentId) qs.set('residentId', params.residentId);
   if (params?.recordType) qs.set('recordType', params.recordType);
   if (params?.date) qs.set('date', params.date);
   return useApiListQuery<CareRecord>(
-    ['care-records', params ?? {}],
+    ['care-records', userId, params ?? {}],
     `/api/care/records?${qs}`,
   );
 }

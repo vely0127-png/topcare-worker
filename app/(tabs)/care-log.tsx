@@ -41,7 +41,7 @@ export default function CareLogScreen() {
 
   const handleSubmit = () => {
     if (!selectedResident) {
-      Alert.alert('알림', '입주자를 선택해주세요');
+      Alert.alert('알림', '입소자를 선택해주세요');
       return;
     }
     if (activeTab === 'service' && !selectedService) {
@@ -77,7 +77,7 @@ export default function CareLogScreen() {
           const resident = residents.find(r => r.id === selectedResident);
           Alert.alert(
             '저장 완료',
-            `${resident?.name ?? '입주자'} 어르신 ${activeTab === 'service' ? '서비스' : '관찰'} 기록이 저장되었습니다`,
+            `${resident?.name ?? '입소자'} 어르신 ${activeTab === 'service' ? '서비스' : '관찰'} 기록이 저장되었습니다`,
           );
           setSelectedService('');
           setNotes('');
@@ -88,7 +88,7 @@ export default function CareLogScreen() {
           if (err instanceof QueuedOfflineError) {
             measure.step('care-log:save:queued');
             const resident = residents.find(r => r.id === selectedResident);
-            Alert.alert('대기 중', `${resident?.name ?? '입주자'} 어르신 기록 — ${err.message}`);
+            Alert.alert('대기 중', `${resident?.name ?? '입소자'} 어르신 기록 — ${err.message}`);
             setSelectedService('');
             setNotes('');
             return;
@@ -124,7 +124,7 @@ export default function CareLogScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* Resident Selection */}
         <View style={styles.field}>
-          <Text style={styles.label}>입주자 선택 *</Text>
+          <Text style={styles.label}>입소자 선택 *</Text>
           {loadingResidents ? (
             <ActivityIndicator size="small" color="#1A5276" />
           ) : (
@@ -141,7 +141,7 @@ export default function CareLogScreen() {
                 </TouchableOpacity>
               ))}
               {residents.length === 0 && (
-                <Text style={styles.emptyText}>입소 중인 입주자가 없습니다</Text>
+                <Text style={styles.emptyText}>입소 중인 입소자가 없습니다</Text>
               )}
             </View>
           )}
@@ -176,7 +176,7 @@ export default function CareLogScreen() {
             placeholder={
               activeTab === 'service'
                 ? '특이사항을 입력하세요...'
-                : '입주자 상태, 행동, 건강 변화 등을 상세히 기록하세요...'
+                : '입소자 상태, 행동, 건강 변화 등을 상세히 기록하세요...'
             }
             multiline
             numberOfLines={6}

@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiListQuery, useApiQuery } from './useApi';
 import { api, ApiError } from '../api/client';
 import { postWithQueue } from '../queue/offline-queue';
+import { useAuthStore } from '../auth/auth-store';
 
 // ── 판정 ────────────────────────────────────────────────────────
 /** 서버 판정(lib/geo.ts judgeGeoVerdict). 'web' = 좌표 없이 들어온 호출(웹 헤더 버튼). */
@@ -41,22 +42,30 @@ export interface Attendance {
   checkMeta: { checkin?: AttendanceCheckMeta; checkout?: AttendanceCheckMeta } | null;
 }
 
-/** 판정 → 사람이 읽는 한 마디. 모르는 값을 '확인됨'으로 올려 부르지 않는다. */
+/**
+ * 판정 → 사람이 읽는 한 마디. 모르는 값을 '확인됨'으로 올려 부르지 않는다.
+ *
+ * H-4(2026-09-23 핫픽스, Q19-16 P4): 호출부(AttendanceCard.tsx)가 항상 "위치 " 접두어를
+ * 붙여 쓰므로("위치 {verdictLabel(...)}") 여기서도 '위치'를 포함하면 "위치 위치 확인 없음"처럼
+ * 중복됐다. 이 함수는 접두어 없는 단어만 돌려준다 — 호출부의 "위치 "/"위치: " 와 합쳐 읽는다.
+ */
 export function verdictLabel(verdict: GeoVerdict | undefined | null): string {
   switch (verdict) {
     case 'verified': return '확인됨';
     case 'near': return '근접';
-    case 'flagged': return '위치 미확인';
-    case 'web': return '위치 확인 없음';
-    default: return '위치 확인 없음';
+    case 'flagged': return '미확인';
+    case 'web': return '확인 없음';
+    default: return '확인 없음';
   }
 }
 
 // ── 본인 오늘 기록 ──────────────────────────────────────────────
 export function useMyAttendanceToday(date: string, enabled = true) {
+  // H-1(2026-09-23): 사용자 전환 시 이전 사람의 출퇴근 기록이 섞이지 않게 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   const qs = new URLSearchParams({ self: '1', date, limit: '5' });
   return useApiListQuery<Attendance>(
-    ['attendance', 'self', date],
+    ['attendance', 'self', userId, date],
     `/api/staff/attendance?${qs}`,
     { query: { enabled, staleTime: 30_000 } },
   );
@@ -104,8 +113,11 @@ export interface AttendanceGeoStatus {
 }
 
 export function useAttendanceGeo(enabled = true) {
+  // H-1(2026-09-23): 관리자 응답에만 실리는 lat/lng 등이 역할이 다른 다음 사용자에게
+  // 새 조회 전에 캐시로 잠깐 보이지 않게 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   return useApiQuery<AttendanceGeoStatus>(
-    ['attendance-geo'],
+    ['attendance-geo', userId],
     '/api/settings/attendance-geo',
     { query: { enabled, staleTime: 5 * 60_000 } },
   );

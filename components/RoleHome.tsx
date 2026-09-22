@@ -5,6 +5,7 @@
  * 이전 2열 그리드(라벨 15pt, 높이 92)를 1열 큰 버튼(라벨 22pt, 높이 84+)으로 바꿨다.
  * 홈은 "무엇을 할지 고르는 곳"만 담당하고, 고른 작업은 전체화면으로 열린다.
  */
+import { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -15,6 +16,7 @@ import { useAuthStore } from '@/lib/auth/auth-store';
 import { AttendanceCard } from '@/components/AttendanceCard';
 import { WidgetPromoCard } from '@/components/WidgetPromoCard';
 import { WidgetPinButton } from '@/components/WidgetPinButton';
+import { ConfirmModal } from '@/components/common/ConfirmModal';
 import { getAppVersionLabel } from '@/lib/utils/app-version';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
@@ -44,6 +46,9 @@ export function RoleHome({
   const role = useRole();
   const logout = useAuthStore((s) => s.logout);
   const versionLabel = getAppVersionLabel();
+  // H-4(2026-09-23, Q19-16) — 로그아웃은 되돌릴 수 없는 동작(세션·큐·위젯 스냅샷 파기)이라
+  // 실수 탭 방지로 한 단계 확인을 거친다. 네이티브 alert 대신 기존 ConfirmModal 재사용.
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
   // href 없는 항목은 표시하지 않는다 — 눌러도 아무 일 없는 버튼은
   // 현장에서 "고장난 앱"으로 읽힌다(가짜 성공 금지 원칙과 같은 이유).
@@ -60,10 +65,22 @@ export function RoleHome({
               {session?.orgName ? ` · ${session.orgName}` : ''}
             </Text>
           </View>
-          <TouchableOpacity style={styles.logoutBtn} onPress={() => void logout()}>
+          <TouchableOpacity style={styles.logoutBtn} onPress={() => setConfirmingLogout(true)}>
             <Text style={styles.logoutText}>로그아웃</Text>
           </TouchableOpacity>
         </View>
+
+        <ConfirmModal
+          visible={confirmingLogout}
+          title="로그아웃할까요?"
+          confirmText="로그아웃"
+          cancelText="취소"
+          onCancel={() => setConfirmingLogout(false)}
+          onConfirm={() => {
+            setConfirmingLogout(false);
+            void logout();
+          }}
+        />
 
         {/* 홈 위젯 안내 카드(W2) — 첫 로그인 후 1회만(내부에서 노출 여부 자체 판단),
             Android 아니면 아무것도 렌더링하지 않는다. headerRow 바로 아래(통합 지점 지시). */}

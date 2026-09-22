@@ -265,7 +265,7 @@ export default function ObservationScreen() {
 
   const handleSave = () => {
     if (!selectedResident) {
-      Alert.alert('알림', '입주자를 선택해주세요');
+      Alert.alert('알림', '입소자를 선택해주세요');
       return;
     }
     const trimmedFree = freeText.trim();
@@ -323,7 +323,7 @@ export default function ObservationScreen() {
         onSuccess: () => {
           // 실증 측정 — 관찰 기록 저장 성공(ADR-001 §7). residentId·성명·기록내용은 담지 않는다.
           measure.save('observation:save');
-          Alert.alert('저장 완료', `${resident?.name ?? '입주자'} 어르신 관찰 기록이 저장되었습니다`);
+          Alert.alert('저장 완료', `${resident?.name ?? '입소자'} 어르신 관찰 기록이 저장되었습니다`);
           setSelected([]);
           setStateSelections({});
           setFreeText('');
@@ -347,7 +347,7 @@ export default function ObservationScreen() {
           // 성공과 같이 입력값을 비우되(로컬에 이미 안전하게 담김), 문구는 "대기 중"으로 정직하게 구분한다.
           if (err instanceof QueuedOfflineError) {
             measure.step('observation:save:queued');
-            Alert.alert('대기 중', `${resident?.name ?? '입주자'} 어르신 관찰 기록 — ${err.message}`);
+            Alert.alert('대기 중', `${resident?.name ?? '입소자'} 어르신 관찰 기록 — ${err.message}`);
             setSelected([]);
             setStateSelections({});
             setFreeText('');
@@ -447,12 +447,12 @@ export default function ObservationScreen() {
         </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {/* 1. 입주자 선택 */}
-          <Text style={styles.sectionLabel}>입주자 선택</Text>
+          {/* 1. 입소자 선택 */}
+          <Text style={styles.sectionLabel}>입소자 선택</Text>
           {loadingResidents ? (
             <ActivityIndicator size="small" color={COLOR.primary} />
           ) : residents.length === 0 ? (
-            <Text style={styles.emptyText}>입소 중인 입주자가 없습니다</Text>
+            <Text style={styles.emptyText}>입소 중인 입소자가 없습니다</Text>
           ) : (
             <View style={styles.residentRow}>
               {residents.map(r => (
