@@ -5,6 +5,7 @@
  * 2026-08-05: 행 구성·체크 로직을 lib/hooks/useTodayTasks로 추출 —
  * 근접 탭(비콘 현재 위치 업무)과 공유. 규약(웹 ServiceTodoList 미러)은 훅 참조.
  */
+import { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { Alert } from '@/lib/ui/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +18,13 @@ export default function TodayTasksScreen() {
   const {
     rows, residents, provisionFor, toggle, pendingKeys, doneCount, loading, fetchError, refetchAll,
   } = useTodayTasks();
+  // A-1(2.4.5): 첫 로딩 스피너는 loading(isLoading)을 그대로 쓰되, 당김 인디케이터는
+  // 별도 로컬 state로 — 다른 탭과 같은 패턴(이 화면은 현재 폴링이 없지만 일관성 유지).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    refetchAll().finally(() => setManualRefreshing(false));
+  };
 
   const onToggle = (row: DisplayRow) =>
     void toggle(
@@ -29,7 +37,7 @@ export default function TodayTasksScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetchAll} />}
+        refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />}
       >
         {/* 헤더 — 날짜 + 진행률 */}
         <View style={styles.dateCard}>

@@ -42,13 +42,20 @@ const fmtDur = (sec: number | null): string => {
 export default function TrailScreen() {
   const {
     mainVisits, shortVisits, contactCount, pendingCount, isToday,
-    isLoading, isRefetching, error, refetch, register,
+    isLoading, error, refetch, register,
   } = useTrail();
 
   const [picking, setPicking] = useState<Visit | null>(null);
   /** 2단계(#23, 2026-09-11) — 1단계(종류)를 고르면 여기 채워지고 상세 시트가 뜬다 */
   const [pickedType, setPickedType] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // A-1(2.4.5): useTrail은 60초 폴링(refetchInterval)을 가진다 — isRefetching은 폴링에도
+  // true가 되므로 RefreshControl은 사용자 당김만 반영하는 로컬 state로 분리한다.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(refetch()).finally(() => setManualRefreshing(false));
+  };
 
   // 짧은 접촉(1분 미만)은 목록에 넣지 않는다 — 묻지 않기로 했으므로.
   const rows = mainVisits;
@@ -116,7 +123,7 @@ export default function TrailScreen() {
 
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />}
+        refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />}
       >
         {rows.length === 0 && !error ? (
           <View style={styles.centered}>

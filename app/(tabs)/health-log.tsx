@@ -32,13 +32,18 @@ export default function HealthLogScreen() {
   const {
     data: intakeData,
     isLoading: loadingIntake,
-    isRefetching,
     refetch,
   } = useMealIntakes({ date: TODAY });
   const { mutate: createIntake, isPending: isSaving } = useMealIntakeCreate();
 
   // 낙관적 UI: 저장 중인 셀 추적
   const [savingCell, setSavingCell] = useState<string | null>(null);
+  // A-1(2.4.5): 당김만 원형 인디케이터로 반영(다른 탭과 같은 패턴).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(refetch()).finally(() => setManualRefreshing(false));
+  };
 
   const residents = residentsData?.items ?? [];
   const intakeItems: MealIntake[] = intakeData?.items ?? [];
@@ -74,7 +79,7 @@ export default function HealthLogScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />
+          <RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />
         }
       >
         {/* Meal Intake */}

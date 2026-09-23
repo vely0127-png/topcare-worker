@@ -79,9 +79,14 @@ export default function ObservationScreen() {
   const {
     data: historyData,
     isLoading: loadingHistory,
-    isRefetching,
     refetch,
   } = useCareRecords({ recordType: 'observation', limit: 30 });
+  // A-1(2.4.5): 당김만 원형 인디케이터로 반영(다른 탭과 같은 패턴).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(refetch()).finally(() => setManualRefreshing(false));
+  };
   const { mutate: createRecord, isPending: isSaving } = useCareRecordCreate();
 
   // 관찰3단 §2/§6: 내장(builtin, 서버 정본) + 커스텀(cards) 통합 조회 — 실패해도 화면은 죽지 않는다
@@ -405,7 +410,7 @@ export default function ObservationScreen() {
         <ScrollView
           contentContainerStyle={styles.content}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />
+            <RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />
           }
         >
           {loadingHistory ? (

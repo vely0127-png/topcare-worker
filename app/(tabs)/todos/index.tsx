@@ -39,7 +39,7 @@ export default function TodosScreen() {
   // assignedTo 필터는 웹이 지원. staffId 없으면(계정-직원 미연결) 전체 노출 유지(정직).
   const session = useSession();
   const staffId = session?.user.staffId ?? undefined;
-  const { data, isLoading, isError, error, refetch, isRefetching } = useTodos(
+  const { data, isLoading, isError, error, refetch } = useTodos(
     staffId ? { assignedTo: staffId } : undefined,
   );
   const { mutate: patchTodo, isPending: isPatching } = useTodoPatch();
@@ -49,6 +49,13 @@ export default function TodosScreen() {
   const [noteText, setNoteText] = useState('');
   // 낙관적 UI: 업데이트 중인 항목 ID 추적
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+  // A-1(2.4.5): RefreshControl은 react-query isRefetching이 아니라 사용자 당김만
+  // 반영하는 로컬 state로 분리(경보·작업판과 같은 패턴 — 폴링이 붙어도 조용히 유지되게).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(refetch()).finally(() => setManualRefreshing(false));
+  };
 
   const todos: Todo[] = data?.items ?? [];
 
@@ -161,7 +168,7 @@ export default function TodosScreen() {
       <ScrollView
         contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />
+          <RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />
         }
       >
         {filtered.length === 0 && (
