@@ -17,6 +17,7 @@
  *   - 조회 실패는 빈 목록으로 위장하지 않는다(오류 문구 + [다시 시도]).
  *   - 그룹원 중 입소자와 연결하지 못한 이름은 감추지 않고 그 수를 적는다.
  */
+import { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl,
@@ -31,6 +32,12 @@ import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 export default function ProgramsScreen() {
   const router = useRouter();
   const q = useProgramsToday();
+  // A-1(2.4.5): 사용자 당김만 원형 인디케이터로 반영(다른 탭과 같은 패턴).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(q.refetch()).finally(() => setManualRefreshing(false));
+  };
 
   const planned = q.data?.planned ?? [];
   const recorded = q.data?.recordedToday ?? [];
@@ -71,7 +78,7 @@ export default function ProgramsScreen() {
     <SafeAreaView style={st.safe} edges={['bottom']}>
       <ScrollView
         contentContainerStyle={st.scroll}
-        refreshControl={<RefreshControl refreshing={!!q.isRefetching} onRefresh={() => void q.refetch()} />}
+        refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />}
       >
         {q.isError ? (
           <View style={st.errorBanner}>

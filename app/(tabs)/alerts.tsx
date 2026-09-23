@@ -165,8 +165,16 @@ export default function AlertsScreen() {
   });
 
   // ── 카드 목록 소스 — 오늘 표시·입소자 드릴다운 표시(카운트가 아니라 "어떤 카드를 보여줄지") ──
-  const { alerts, isLoading, isError, refetch, isFetching } = useAlerts({ limit: 200 });
+  const { alerts, isLoading, isError, refetch } = useAlerts({ limit: 200 });
   const ackMutation = useAcknowledgeAlert();
+  // A-1(2.4.5): isFetching은 useAlerts의 30초 백그라운드 폴링에도 true가 되므로
+  // RefreshControl에 직결하지 않는다 — 사용자 당김만 로컬 state로 반영한다.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = useCallback(() => {
+    setManualRefreshing(true);
+    Promise.allSettled([refetch(), summaryQ.refetch()]).finally(() => setManualRefreshing(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refetch]);
 
   const isToday = useCallback((iso: string) => toKSTDate(iso) === today, [today]);
   const todaysAlerts = alerts.filter((a) => isToday(a.createdAt));
@@ -299,7 +307,7 @@ export default function AlertsScreen() {
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={s.list}
-          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); void summaryQ.refetch(); }} tintColor="#1A5276" />}
+          refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} tintColor="#1A5276" />}
         >
           {/* ② 지난 미처리 — 기간 필터로 감추지 않는다(접수 전까지 계속 노출) */}
           {!!overdue && overdue.count > 0 && (

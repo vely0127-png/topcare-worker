@@ -93,7 +93,7 @@ export interface UseTodayTasksResult {
   doneCount: number;
   loading: boolean;
   fetchError: string | null;
-  refetchAll: () => void;
+  refetchAll: () => Promise<unknown>;
 }
 
 export function useTodayTasks(): UseTodayTasksResult {
@@ -221,8 +221,12 @@ export function useTodayTasks(): UseTodayTasksResult {
     }
   }, [pendingKeys, provisionFor, createProvision, deleteProvision, today]);
 
+  // Promise.allSettled로 반환 — 호출부(당김 새로고침 로컬 인디케이터)가 완료 시점을 알 수 있게.
+  // 기존 "void refetch() 각각 병렬 호출"이라는 갱신 동작 자체는 그대로다.
   const refetchAll = useCallback(() => {
-    void schedulesQ.refetch(); void provisionsQ.refetch(); void residentsQ.refetch(); void facilityQ.refetch();
+    return Promise.allSettled([
+      schedulesQ.refetch(), provisionsQ.refetch(), residentsQ.refetch(), facilityQ.refetch(),
+    ]);
   }, [schedulesQ, provisionsQ, residentsQ, facilityQ]);
 
   return { today, rows, residents, provisionFor, toggle, pendingKeys, doneCount, loading, fetchError, refetchAll };

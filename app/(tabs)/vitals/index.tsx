@@ -7,6 +7,7 @@
  * 정직성: 미측정을 정상으로 그리지 않는다. 값이 없으면 '—'와 '미측정'으로 표시하고
  *        정렬에서 위로 올려 "아직 안 잰 사람"이 먼저 보이게 한다.
  */
+import { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl,
@@ -35,7 +36,14 @@ const show = (v: number | null | undefined) => (v == null ? '—' : String(v));
 export default function VitalsScreen() {
   const router = useRouter();
   const today = getKSTToday();
-  const { data, isLoading, isError, error, refetch, isRefetching } = useVitals();
+  const { data, isLoading, isError, error, refetch } = useVitals();
+  // A-1(2.4.5): useVitals는 60초 폴링(refetchInterval)을 가진다 — RefreshControl은
+  // 사용자 당김만 반영하는 로컬 state로 분리(폴링은 조용히).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(refetch()).finally(() => setManualRefreshing(false));
+  };
 
   const items = data ?? [];
   const measuredToday = (v: VitalItem) =>
@@ -73,7 +81,7 @@ export default function VitalsScreen() {
         <ScrollView
           contentContainerStyle={styles.content}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} />
+            <RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />
           }
         >
           <View style={styles.summary}>

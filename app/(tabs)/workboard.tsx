@@ -593,9 +593,18 @@ export default function WorkboardScreen() {
   const isLoading = schedulesQ.isLoading || provisionsQ.isLoading || residentsQ.isLoading || facilityQ.isLoading;
   // 일과표·입소자 조회가 실패하면 판이 조용히 비어 보인다 — 빈 판으로 위장하지 않는다(정직성 원칙)
   const isError = schedulesQ.isError || residentsQ.isError || facilityQ.isError;
+  // A-1(2.4.5): RefreshControl의 refreshing은 react-query isRefetching(20초 백그라운드 폴링 포함)이
+  // 아니라 "사용자가 당겼다"는 로컬 state만 본다 — 폴링은 조용히, 당김만 원형 인디케이터를 보인다.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const refetchAll = () => {
     void schedulesQ.refetch(); void provisionsQ.refetch();
     void residentsQ.refetch(); void facilityQ.refetch();
+  };
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.allSettled([
+      schedulesQ.refetch(), provisionsQ.refetch(), residentsQ.refetch(), facilityQ.refetch(),
+    ]).finally(() => setManualRefreshing(false));
   };
 
   // ── H-6(2026-09-23) 이월 구획 — "오늘 블록 중 시작 시각 + 30분 < 지금 이고 실적 없음"
@@ -724,7 +733,7 @@ export default function WorkboardScreen() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={st.scroll}
-        refreshControl={<RefreshControl refreshing={!!provisionsQ.isRefetching} onRefresh={refetchAll} />}
+        refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />}
       >
         {isError && (
           <View style={st.errorBanner}>

@@ -35,6 +35,12 @@ export default function PayrollListScreen() {
     () => [...(q.data?.items ?? [])].sort((a, b) => b.payPeriod.localeCompare(a.payPeriod)),
     [q.data],
   );
+  // A-1(2.4.5): 사용자 당김만 원형 인디케이터로 반영(다른 탭과 같은 패턴).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = () => {
+    setManualRefreshing(true);
+    Promise.resolve(q.refetch()).finally(() => setManualRefreshing(false));
+  };
 
   if (!staffId) {
     return (
@@ -93,7 +99,7 @@ export default function PayrollListScreen() {
       ) : (
         <ScrollView
           contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => void q.refetch()} />}
+          refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />}
         >
           {items.length === 0 && !q.isError ? (
             <View style={styles.centered}>
