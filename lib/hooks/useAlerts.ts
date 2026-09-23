@@ -131,18 +131,40 @@ export interface AlertSummaryGroup {
   unhandled: number;
   urgent: number;
 }
+/**
+ * P1 크래시 수정(2026-09-23 PD 에뮬레이터 실측) — 이 타입은 애초에 실제 API-2 계약과
+ * 달랐다. 웹 정본(`code/topcare-web/lib/alerts/summary.ts AlertOverdueItem`, 팀 AA
+ * 커밋 c73289c)의 실제 필드는 `level`(원시 severity 문자열, 소문자)뿐이고 `severity`·
+ * `status`·`type`·`description`·`roomName`은 아예 없다 — AlertCard가 `item.severity`로
+ * 곧장 스타일 맵을 조회해 undefined.bg를 읽어 크래시했다. 화면(alerts.tsx)은 이 타입 그대로
+ * 쓰지 않고 `normalizeOverdueItem()`으로 AlertItem 모양으로 변환한 뒤에만 카드에 넘긴다.
+ */
 export interface AlertSummaryOverdueItem {
   id: string;
-  type: string;
-  title: string;
-  description?: string;
-  severity: AlertSeverity;
-  status: AlertStatus;
-  residentId?: string;
-  residentName: string;
-  roomName: string;
+  residentId: string | null;
+  residentName: string | null;
+  level: string; // 원시 severity 문자열(예: 'critical'|'high'|'medium'|'low', 대소문자 보장 없음)
   createdAt: string;
+  title: string | null;
 }
+
+/** overdueUnhandled.items(API-2 원시 계약) → AlertCard가 쓰는 AlertItem 모양으로 정규화.
+ *  overdueUnhandled는 서버가 이미 "미처리"만 골라 준 것이라 status는 항상 'new'로 둔다.
+ *  알 수 없는/누락된 level·title도 절대 크래시하지 않고 기본값으로 떨어진다. */
+export function normalizeOverdueItem(o: AlertSummaryOverdueItem): AlertItem {
+  return {
+    id: o.id,
+    type: '', // 서버가 안 준다 — TYPE_LABELS 매핑 없이 title을 그대로 쓴다
+    title: o.title ?? '경보',
+    severity: normalizeSeverity(o.level ?? ''),
+    status: 'new',
+    residentId: o.residentId ?? undefined,
+    residentName: o.residentName ?? '(수급자 미상)',
+    roomName: '',
+    createdAt: o.createdAt,
+  };
+}
+
 export interface AlertSummary {
   today: { total: number; unhandled: number; urgent: number };
   overdueUnhandled: { count: number; items: AlertSummaryOverdueItem[] };
