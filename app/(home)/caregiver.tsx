@@ -18,7 +18,7 @@ export default function CaregiverHome() {
     // P1(2026-07-27): href 없던 죽은 카드 → 실제 화면 연결 (비콘 미설치 시설은 화면에서 안내)
     { key: 'beacon', label: '자동 기록', href: '/(tabs)/service-log', hint: '비콘 근접 자동기록', icon: 'clipboard-check' },
     { key: 'proximity', label: '비콘 근접', href: '/(tabs)/proximity', hint: '현재 위치·근접 인증', icon: 'bluetooth-connect' },
-    { key: 'alerts', label: '알림', href: '/(tabs)/alerts', icon: 'bell' },
+    { key: 'alerts', label: '경보', href: '/(tabs)/alerts', icon: 'bell' }, // H-7⑤(2026-09-23) 용어 정본
     // 2026-09-11 급여명세서(전자로 진행, 대표 결정) — 확정본만 표시
     { key: 'payroll', label: '급여명세서', href: '/(tabs)/payroll', hint: '월별 지급·공제 내역', icon: 'cash-multiple' },
   ], [pendingCount]);

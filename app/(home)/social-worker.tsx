@@ -6,7 +6,7 @@ const ACTIONS: QuickAction[] = [
   { key: 'programs', label: '오늘 프로그램', href: '/(tabs)/programs', hint: '참여자·참여도 기록', icon: 'account-group', primary: true },
   { key: 'care-log', label: '케어 기록', href: '/(tabs)/care-log', hint: '서비스·관찰 일지', icon: 'clipboard-edit' },
   { key: 'observation', label: '관찰 일지', href: '/(tabs)/observation', icon: 'eye-check' },
-  { key: 'alerts', label: '알림', href: '/(tabs)/alerts', icon: 'bell' },
+  { key: 'alerts', label: '경보', href: '/(tabs)/alerts', icon: 'bell' }, // H-7⑤(2026-09-23) 용어 정본
   // 2026-09-11 급여명세서(전자로 진행, 대표 결정) — 확정본만 표시
   { key: 'payroll', label: '급여명세서', href: '/(tabs)/payroll', hint: '월별 지급·공제 내역', icon: 'cash-multiple' },
   // 앱 미구현 — 웹에서

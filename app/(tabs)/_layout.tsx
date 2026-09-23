@@ -57,7 +57,7 @@ export default function TaskStackLayout() {
       <Stack.Screen name="trail" options={{ title: '내 행적' }} />
       <Stack.Screen name="service-log" options={{ title: '자동 기록' }} />
       <Stack.Screen name="proximity" options={{ title: '비콘 근접' }} />
-      <Stack.Screen name="alerts" options={{ title: '알림' }} />
+      <Stack.Screen name="alerts" options={{ title: '경보' }} /> {/* H-7⑤(2026-09-23) 용어 정본 */}
       <Stack.Screen name="payroll/index" options={{ title: '급여명세서' }} />
       <Stack.Screen name="payroll/detail" options={{ title: '급여명세서 상세' }} />
     </Stack>

@@ -101,6 +101,36 @@ export interface CreateServiceProvisionVars {
   selection?: Record<string, string[]>;
 }
 
+// ── H-8 일괄 완료(2026-09-23) — API-1 bulk 1회 ────────────────
+// 계약: TopCare_워커앱_핫픽스_2.4.3_설계_20260923.md "2.4.4 착수 계약" API-1.
+// 단건 POST와 같은 검증·중복 차단 함수를 웹이 재사용(두 번째 경로 규칙) — 앱은 그 응답을
+// 그대로 행 상태에 매핑한다(created=성공/duplicates=이미 있음/failed=실패, 화면에서 재판정 금지).
+export interface BulkCreateItem {
+  residentId: string;
+  serviceType: string;
+  serviceDate: string; // YYYY-MM-DD
+  startAt: string; // ISO
+  scheduleId?: string;
+  staffId: string;
+  source: 'manual';
+  note?: string;
+}
+export interface BulkCreateResult {
+  created: { index: number; id: string; scheduleId?: string }[];
+  duplicates: { index: number; existingId: string }[];
+  failed: { index: number; code: string; message: string }[];
+}
+
+export function useBulkCreateServiceProvisions() {
+  const qc = useQueryClient();
+  return useMutation<BulkCreateResult, ApiError | Error, { items: BulkCreateItem[] }>({
+    // 오프라인 큐 대상 아님(bulk는 QueueKind에 없다) — 실패는 호출부가 기존 단건 큐 경로로
+    // 항목별 폴백한다(설계 H-8⑤ "오프라인이면 기존 큐 경로로 항목별 폴백").
+    mutationFn: (vars) => api.post<BulkCreateResult>('/api/care/service-provisions/bulk', vars),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['service-provisions'] }),
+  });
+}
+
 export function useCreateServiceProvision() {
   const qc = useQueryClient();
   return useMutation<ServiceProvision, ApiError | Error, CreateServiceProvisionVars>({

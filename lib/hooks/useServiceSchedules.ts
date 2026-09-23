@@ -22,6 +22,14 @@ export interface ServiceSchedule {
   severity: string;
   isActive: boolean;
   note: string | null;
+  /**
+   * 044 / H-8(2026-09-23) — 출처: 'assessment'(기초평가 개인 계획) | 'template'(시설 일과표) |
+   * 'manual'(수기). 웹 API가 이미 shape()에서 내려준다(2026-09-16 배포) — 필드만 앱에 추가.
+   * 일괄 완료(H-8④)가 개인 계획(assessment) 행을 제외할 때 이 값으로 판정한다.
+   */
+  source?: string;
+  /** 웹 serviceTierOf(source) — 'basic'|'plan'|'manual' (배지용, 현재 워크보드는 미표시) */
+  tier?: string;
 }
 
 export interface ServiceScheduleListParams {
