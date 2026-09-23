@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@supabase/supabase-js';
 import { api, asItems } from '../api/client';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config';
+import { useAuthStore } from '../auth/auth-store';
 
 // ── 타입 ──────────────────────────────────────────────────────
 export type AlertSeverity = 'Critical' | 'High' | 'Medium' | 'Low';
@@ -57,6 +58,8 @@ export function useAlerts(options?: {
   limit?: number;
 }) {
   const qc = useQueryClient();
+  // H-1(2026-09-23): 사용자 전환 시 캐시가 섞이지 않게 queryKey에 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   // 쿼리 파라미터
   const params = new URLSearchParams();
   if (options?.status) params.set('status', options.status);
@@ -66,7 +69,7 @@ export function useAlerts(options?: {
   const qs = `?${params.toString()}`;
 
   const query = useQuery<PaginatedAlerts, Error>({
-    queryKey: ['alerts', options],
+    queryKey: ['alerts', userId, options],
     // P0-1(2026-07-27): 웹 paginated()는 data 자체가 배열 — {items}로 정규화 (이전엔 항상 빈 목록)
     queryFn: async () => {
       const data = await api.get<unknown>(`/api/safety/alerts${qs}`);

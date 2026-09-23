@@ -84,6 +84,37 @@ export function AttendanceCard() {
   const checkedIn = !!record?.clockIn;
   const checkedOut = !!record?.clockOut;
 
+  /**
+   * 출근 전송 — 자동 진입점(autoCheckin)과 수동 [출근] 버튼(manualCheckin)이
+   * 공유하는 단 하나의 경로(핫픽스 H-2, 두 번째 경로 규칙: buildBody('checkin')·
+   * postAttendance 를 복제하지 않는다). 큐잉(오프라인)은 성공에 준해 처리하고,
+   * 그 외 실패는 호출부로 던져 각자 사정에 맞게 처리하게 한다(자동은 재시도 플래그
+   * 리셋, 수동은 화면에 실패를 그대로 보여준다 — 가짜 성공 금지).
+   */
+  const attemptCheckin = useCallback(async () => {
+    if (!staffId) return;
+    setBusy('checkin');
+    setSendError(null);
+    try {
+      const { body, locationNote: note } = await buildBody('checkin', true);
+      await postAttendance(body);
+      setLocationNote(note);
+      await saveAutoCheckinDate(staffId, today);
+      void attendanceQ.refetch();
+    } catch (e) {
+      // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 유실이 아니다. 하루 1회 재전송 방지
+      // 메모를 그대로 남겨(전송은 큐가 보장) 포그라운드마다 중복으로 큐잉되지 않게 한다.
+      if (e instanceof QueuedOfflineError) {
+        setLocationNote(`출근 요청이 ${e.message}`);
+        await saveAutoCheckinDate(staffId, today);
+        return;
+      }
+      throw e;
+    } finally {
+      setBusy(null);
+    }
+  }, [staffId, today, postAttendance, attendanceQ]);
+
   // ── 자동 출근 — 포그라운드 진입 시 1회, 하루 첫 성공 후 재전송 없음 ──
   const autoCheckin = useCallback(async () => {
     if (!staffId || autoRunRef.current) return;
@@ -92,37 +123,23 @@ export function AttendanceCard() {
     if (attendanceQ.isLoading || attendanceQ.isError) return;
     if (checkedIn) {
       autoRunRef.current = true;
-      void saveAutoCheckinDate(today);
+      void saveAutoCheckinDate(staffId, today);
       return;
     }
-    const memo = await loadAutoCheckinDate();
+    const memo = await loadAutoCheckinDate(staffId);
     if (memo === today) { autoRunRef.current = true; return; }
 
     autoRunRef.current = true;
-    setBusy('checkin');
-    setSendError(null);
     try {
       // 자동 출근은 하루 1회뿐이므로 권한이 없으면 이때 한 번 물어본다(그 뒤로는 묻지 않는다).
-      const { body, locationNote: note } = await buildBody('checkin', true);
-      await postAttendance(body);
-      setLocationNote(note);
-      await saveAutoCheckinDate(today);
-      void attendanceQ.refetch();
+      await attemptCheckin();
     } catch (e: any) {
-      // 오프라인 큐(2026-09-06 vc11) — 큐에 들어간 것은 유실이 아니다. 하루 1회 재전송 방지
-      // 메모를 그대로 남겨(전송은 큐가 보장) 포그라운드마다 중복으로 큐잉되지 않게 한다.
-      if (e instanceof QueuedOfflineError) {
-        setLocationNote(`출근 요청이 ${e.message}`);
-        await saveAutoCheckinDate(today);
-        return;
-      }
       // 실패는 성공으로 위장하지 않는다 — 메모도 남기지 않아 다음 진입에서 다시 시도한다.
+      // 대신 미출근 상태로 남으므로 아래 [출근] 수동 버튼이 즉시 나타난다(H-2).
       autoRunRef.current = false;
       setSendError(e?.message ?? '출근 기록 전송에 실패했습니다');
-    } finally {
-      setBusy(null);
     }
-  }, [staffId, consentCleared, attendanceQ.isLoading, attendanceQ.isError, checkedIn, today, postAttendance]);
+  }, [staffId, consentCleared, attendanceQ.isLoading, attendanceQ.isError, checkedIn, today, attemptCheckin]);
 
   useEffect(() => {
     void autoCheckin();
@@ -132,6 +149,26 @@ export function AttendanceCard() {
     });
     return () => sub.remove();
   }, [autoCheckin]);
+
+  // ── 수동 [출근] 버튼 — 자동 출근이 아직 실행되지 않았거나 실패한 상태의 안전망(H-2) ──
+  // 공용 폰·교대 로그인 시설에서 day-memo 가 직원별로 나뉘어도, 자동 전송이 네트워크
+  // 등으로 실패하면 다음 포그라운드 전환까지 출근할 방법이 없었다 — 사람이 직접 누를 수
+  // 있게 한다. 경로는 attemptCheckin() 하나(자동과 동일 — buildBody·postAttendance 재사용).
+  const manualCheckin = useCallback(async () => {
+    if (busy || checkedIn || !consentCleared) return;
+    autoRunRef.current = true; // 수동으로 처리했으니 자동 경로가 뒤늦게 끼어들지 않게 한다
+    try {
+      await attemptCheckin();
+    } catch (e: any) {
+      autoRunRef.current = false; // 실패는 실패로 — 버튼을 다시 누를 수 있게 열어둔다
+      setSendError(e?.message ?? '출근 기록 전송에 실패했습니다');
+    }
+  }, [busy, checkedIn, consentCleared, attemptCheckin]);
+
+  // 미출근 + 자동 출근이 아직 끝나지 않았거나(대기/실행 전) 실패한 상태 = 버튼 노출 조건.
+  // 조회 자체가 안 끝났으면(로딩·오류) 판단을 미룬다 — "출근 안 함"으로 성급히 단정하지 않는다.
+  const showManualCheckin =
+    !checkedIn && !attendanceQ.isLoading && !attendanceQ.isError && busy !== 'checkin';
 
   // ── 퇴근 — 탭 1번, 같은 위치 판정 ──
   const checkout = async () => {
@@ -250,7 +287,22 @@ export function AttendanceCard() {
             <Text style={st.checkoutText}>퇴근</Text>
           </TouchableOpacity>
         ) : null}
+        {/* 수동 [출근] 버튼(H-2) — 자동 출근이 아직이거나 실패했을 때의 안전망.
+            동의 미완이면 비활성 + 이유를 아래에 적는다(가짜 비활성 금지). */}
+        {showManualCheckin ? (
+          <TouchableOpacity
+            style={st.checkinBtn}
+            disabled={!!busy || !consentCleared}
+            onPress={() => void manualCheckin()}
+          >
+            <Text style={st.checkinText}>출근</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
+
+      {showManualCheckin && !consentCleared ? (
+        <Text style={st.note}>개인정보 동의 후 가능</Text>
+      ) : null}
 
       <ConfirmModal
         visible={confirmingCheckout}
@@ -338,6 +390,14 @@ const st = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   checkoutText: { color: COLOR.onPrimary, fontSize: FONT.body, fontWeight: '800' },
+
+  // 수동 [출근] 버튼(H-2, 2026-09-23) — 퇴근 버튼과 같은 크기, 성공 계열 색으로 구분.
+  checkinBtn: {
+    minHeight: TOUCH.min, minWidth: 92, paddingHorizontal: SPACE.md,
+    borderRadius: RADIUS.md, backgroundColor: COLOR.success,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkinText: { color: COLOR.onPrimary, fontSize: FONT.body, fontWeight: '800' },
 
   errorRow: { gap: SPACE.sm },
   errorText: { fontSize: FONT.label, color: COLOR.danger, fontWeight: '600' },

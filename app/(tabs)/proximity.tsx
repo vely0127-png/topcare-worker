@@ -450,7 +450,7 @@ export default function ProximityScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>근접 이벤트</Text>
           {events.length === 0 ? (
-            <Text style={styles.empty}>enter/exit 이벤트가 여기에 표시됩니다.</Text>
+            <Text style={styles.empty}>진입/이탈 이벤트가 여기에 표시됩니다.</Text>
           ) : (
             events.map((e, i) => (
               <View key={`${e.uuid}-${e.at}-${i}`} style={styles.eventRow}>

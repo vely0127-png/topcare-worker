@@ -4,6 +4,7 @@
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
+import { useAuthStore } from '../auth/auth-store';
 
 export interface Todo {
   id: string;
@@ -44,10 +45,12 @@ export function deriveSource(category: string | null): 'manager_assigned' | 'ai_
 }
 
 export function useTodos(filters?: { assignedTo?: string }) {
+  // H-1(2026-09-23): 사용자 전환 시 캐시가 섞이지 않게 queryKey에 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   const qs = new URLSearchParams({ limit: '100' });
   if (filters?.assignedTo) qs.set('assignedTo', filters.assignedTo);
   return useApiListQuery<Todo>(
-    ['todos', filters ?? {}],
+    ['todos', userId, filters ?? {}],
     `/api/todos?${qs}`,
   );
 }

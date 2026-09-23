@@ -45,8 +45,9 @@ export default function ConsentScreen() {
     }
   };
 
+  // H-1(2026-09-23): 사용자 전환 시 캐시가 섞이지 않게 queryKey에 userId 포함.
   const { data, isLoading } = useQuery({
-    queryKey: ['consent', CONSENT_TYPE],
+    queryKey: ['consent', CONSENT_TYPE, session?.user.id ?? null],
     queryFn: () => apiFetch<ConsentStatus>(`/api/consent?type=${CONSENT_TYPE}`),
   });
 

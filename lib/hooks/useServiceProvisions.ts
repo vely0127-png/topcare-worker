@@ -12,6 +12,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
 import { postWithQueue } from '../queue/offline-queue';
+import { useAuthStore } from '../auth/auth-store';
 
 // ── 타입 ──────────────────────────────────────────────────────
 export type ProvisionStatus = 'draft' | 'confirmed' | 'rejected';
@@ -55,6 +56,8 @@ export interface ServiceProvisionListParams {
 
 // ── GET 목록 훅 ───────────────────────────────────────────────
 export function useServiceProvisions(params?: ServiceProvisionListParams) {
+  // H-1(2026-09-23): 사용자 전환 시 캐시가 섞이지 않게 queryKey에 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   const qs = new URLSearchParams({ limit: String(params?.limit ?? 50) });
   if (params?.residentId) qs.set('residentId', params.residentId);
   if (params?.staffId) qs.set('staffId', params.staffId);
@@ -66,7 +69,7 @@ export function useServiceProvisions(params?: ServiceProvisionListParams) {
   if (params?.dateTo) qs.set('dateTo', params.dateTo);
 
   return useApiListQuery<ServiceProvision>(
-    ['service-provisions', params ?? {}],
+    ['service-provisions', userId, params ?? {}],
     `/api/care/service-provisions?${qs}`,
     { query: { refetchInterval: 20_000 } },
   );

@@ -154,7 +154,7 @@ export default function ServiceLogScreen() {
     [alerts],
   );
 
-  // 입주자 목록 (수동 선택 모달용)
+  // 입소자 목록 (수동 선택 모달용)
   const { data: residentsData } = useResidents({ status: '입소 중' });
   const residents = (residentsData?.items ?? []).map((r) => ({
     id: r.id,

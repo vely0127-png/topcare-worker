@@ -25,6 +25,10 @@ import { normalizeRole, type RoleKey } from './roles';
 import type { AuthSession, AuthStatus, LoginCredentials } from './types';
 // 홈 위젯(W2, 2026-09-07, ADR-001 C-10) — 로그아웃 시 위젯 스냅샷도 즉시 지운다.
 import { clearWidgetSnapshot } from '../widget/write-snapshot';
+// 핫픽스 H-1(2026-09-23, Q19-17 P1) — react-query 캐시가 사용자 전환 사이에 살아남아
+// 같은 기기에서 로그인한 다음 사람이 이전 사람의 데이터를 잠깐이라도 보는 사고가 났다.
+// login 성공·logout 시 캐시 전체를 비운다(단일 QueryClient 인스턴스, lib/query-client.ts).
+import { queryClient } from '../query-client';
 
 interface AuthState {
   status: AuthStatus;
@@ -86,6 +90,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const token = session.token ?? null;
       if (token) await saveToken(token);
       await saveSession(session);
+      // H-1: 이전 사용자(또는 부팅 시 미인증 상태)의 쿼리 캐시가 새 사용자 화면에
+      // 한 프레임도 비치지 않게 로그인 확정 전에 비운다.
+      queryClient.clear();
       set({ status: 'authenticated', session, token, error: null });
       return session;
     } catch (e) {
@@ -98,6 +105,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: async () => {
     await clearAuthStorage();
     void clearWidgetSnapshot(); // 위젯 잔존 콘텐츠 파기(ADR §6-2·C-10) — 실패해도 로그아웃을 막지 않는다
+    // H-1: 다음 로그인이 항상 서버 조회부터 시작하도록 캐시를 비운다(메모리 캐시로
+    // 다음 사용자에게 동의·근태 등 이전 사용자 데이터가 새는 것을 막는다).
+    queryClient.clear();
     set({ status: 'unauthenticated', session: null, token: null, error: null });
   },
 

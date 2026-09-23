@@ -20,6 +20,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiListQuery, useApiQuery } from './useApi';
 import { api, ApiError } from '../api/client';
+import { useAuthStore } from '../auth/auth-store';
 
 // ── 월 목록 ─────────────────────────────────────────────────────
 export interface PayrollListItem {
@@ -32,8 +33,10 @@ export interface PayrollListItem {
 }
 
 export function useMyPayrollList(year: string, enabled = true) {
+  // H-1(2026-09-23): "내" 급여명세서 목록 — 사용자 전환 시 캐시가 섞이지 않게 userId 포함.
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
   return useApiListQuery<PayrollListItem>(
-    ['payroll', 'mine', year],
+    ['payroll', 'mine', userId, year],
     `/api/staff/payroll/mine?year=${encodeURIComponent(year)}`,
     { query: { enabled, staleTime: 60_000 } },
   );

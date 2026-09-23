@@ -26,7 +26,7 @@ Mobile 팀 (React Native)
 
 | 탭 | 경로 | 주요 기능 |
 |---|------|---------|
-| 내 근무 | app/screens/my-schedule | 오늘 배정 근무, 담당 입주자 목록, 업무 지시 확인 |
+| 내 근무 | app/screens/my-schedule | 오늘 배정 근무, 담당 입소자 목록, 업무 지시 확인 |
 | 케어 기록 | app/screens/care-log | 서비스 기록·관찰 일지 빠른 입력, 음성 입력 (P1) |
 | 알림 | app/screens/alerts | 실시간 알림, 낙상·바이탈 긴급 알람 전체화면 인터럽트 |
 | 건강 기록 | app/screens/health-log | 식사 섭취, 체중, 일일 점검 기록 |
