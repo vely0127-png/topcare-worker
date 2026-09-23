@@ -1,10 +1,36 @@
+/**
+ * 경보 화면 — H-7(2026-09-23) "오늘이 기본, 지난 것은 주별·입소자별 카운트로".
+ *
+ * 왜 바뀌었나 (대표 09-23 에뮬레이터 스크린샷)
+ *   기존 화면은 9일 전 카드까지 시간순으로 늘어서 있어 "지금 처리할 것"이 목록 어딘가에
+ *   묻혔다. 대표 원문: "전체·위급·미처리를 오늘을 디폴트, 주별 히스토리를 개인별 카운트로".
+ *
+ * 구조
+ *   ① 오늘 요약 띠(오늘 경보 N · 미처리 n · 위급 k) — 숫자는 전부 API-2(useAlertSummary) 응답.
+ *      이 화면은 그 응답만 읽는다 — 화면에서 다시 세지 않는다(반복 결함 차단 규약).
+ *   ② 오늘 이전 미처리(overdueUnhandled) — 기간 필터로 감추지 않는다. 접수 전까지 계속 노출.
+ *   ③ 오늘 경보 목록 — 필터(전체/미처리/위급)는 오늘 범위 안에서만 동작.
+ *   ④ 지난 경보 — 이번 주/지난 주/그 이전 3버킷(접힘), 펼치면 입소자별 카운트 행 →
+ *      탭하면 그 입소자의 경보 목록(같은 버킷 범위)으로 들어간다.
+ *
+ * 용어(CLAUDE.md 동음이의 해소, 2026-09-16): 화면명 "경보", 배지 "미처리 경보",
+ * 접수 버튼 "접수"(구 "확인했습니다"), 홈 메뉴 "알림"→"경보".
+ *
+ * 목록(오늘 카드·입소자 드릴다운)은 여전히 GET /api/safety/alerts(useAlerts)를 쓴다 —
+ * 이 라우트는 날짜·수급자 필터가 없어 limit을 넉넉히(200) 받아 화면에서 "오늘"·"이 수급자"로
+ * *표시만* 걸러낸다(카운트·배지가 아니라 어떤 카드를 보여줄지 고르는 것 — ④ 규약과 무관).
+ */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, findNodeHandle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { useLocalSearchParams } from 'expo-router';
-import { useAlerts, useAcknowledgeAlert, type AlertItem, type AlertSeverity } from '@/lib/hooks/useAlerts';
+import {
+  useAlerts, useAcknowledgeAlert, useAlertSummary,
+  type AlertItem, type AlertSeverity, type AlertSummaryOverdueItem,
+} from '@/lib/hooks/useAlerts';
+import { toKSTDate, getKSTToday } from '@/lib/utils/date';
 import EmergencyAlertModal from '@/components/EmergencyAlertModal';
 import { measure } from '@/lib/measure/client';
 import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';
@@ -39,9 +65,26 @@ function relTime(iso: string): string {
   catch { return iso; }
 }
 
-type FilterTab = 'all' | 'new' | 'critical';
+/** 순수 달력 문자열 연산(타임존 파싱 없음) — YYYY-MM-DD 문자열끼리만 다룬다. */
+function addDaysStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+/** 그 날짜가 속한 주의 월요일(YYYY-MM-DD). */
+function weekStartOf(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  const day = d.getUTCDay(); // 0=일 ... 6=토
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
 
-interface CardProps { item: AlertItem; onAck: (id: string) => void; acking: boolean; highlighted?: boolean; }
+type FilterTab = 'all' | 'new' | 'critical';
+type WeekBucket = 'this' | 'last' | 'older';
+const BUCKET_LABEL: Record<WeekBucket, string> = { this: '이번 주', last: '지난 주', older: '그 이전' };
+
+interface CardProps { item: AlertItem | AlertSummaryOverdueItem; onAck: (id: string) => void; acking: boolean; highlighted?: boolean; }
 
 function AlertCard({ item, onAck, acking, highlighted }: CardProps) {
   const cfg = SEV_CFG[item.severity];
@@ -59,11 +102,12 @@ function AlertCard({ item, onAck, acking, highlighted }: CardProps) {
       <Text style={s.subT}>{item.residentName} / {item.roomName}</Text>
       {!!item.description && <Text style={s.descT}>{item.description}</Text>}
       {isNew && (
+        // H-7⑤ 용어 정본 — "확인했습니다" → "접수"(경보 접수 버튼은 '접수', 2026-09-16 동음이의 해소)
         <TouchableOpacity style={[s.ackBtn, acking && s.ackBtnOff]} onPress={() => onAck(item.id)} disabled={acking}>
-          {acking ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.ackTxt}>확인했습니다</Text>}
+          {acking ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.ackTxt}>접수</Text>}
         </TouchableOpacity>
       )}
-      {item.status === 'acknowledged' && <Text style={s.doneT}>확인됨</Text>}
+      {item.status === 'acknowledged' && <Text style={s.doneT}>접수됨</Text>}
       {item.status === 'resolved' && <Text style={[s.doneT, { color: '#16A34A' }]}>해결됨</Text>}
     </View>
   );
@@ -74,6 +118,21 @@ export default function AlertsScreen() {
   const [emergency, setEmergency] = useState<AlertItem | null>(null);
   const [ackingId, setAckingId] = useState<string | null>(null);
   const shownRef = useRef(new Set<string>());
+  const today = getKSTToday();
+
+  // ── H-7④ 주 버킷 경계(달력 문자열 연산만, 타임존 파싱 없음) ──
+  const thisWeekStart = weekStartOf(today);
+  const lastWeekStart = addDaysStr(thisWeekStart, -7);
+  const lastWeekEnd = addDaysStr(thisWeekStart, -1);
+  const olderEnd = addDaysStr(lastWeekStart, -1);
+  const bucketRange = useCallback((bucket: WeekBucket): { from: string; to: string } => {
+    if (bucket === 'this') return { from: thisWeekStart, to: today };
+    if (bucket === 'last') return { from: lastWeekStart, to: lastWeekEnd };
+    return { from: '2000-01-01', to: olderEnd };
+  }, [thisWeekStart, today, lastWeekStart, lastWeekEnd, olderEnd]);
+
+  const [expandedWeek, setExpandedWeek] = useState<WeekBucket | null>(null);
+  const [residentDrill, setResidentDrill] = useState<{ bucket: WeekBucket; residentId: string; residentName: string } | null>(null);
 
   // 위젯 딥링크 진입(W2 통합) — topcare-worker://alerts?entry=widget(목록 직결) 또는
   // app/alerts/[id].tsx 리다이렉트가 넘긴 id·entry(topcare-worker://alerts/{id}?entry=widget).
@@ -85,12 +144,32 @@ export default function AlertsScreen() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const widgetTargetConsumedRef = useRef(false);
 
-  const apiOpts = filter === 'new' ? { status: 'new' as const }
-    : filter === 'critical' ? { severity: 'Critical' as const }
-    : undefined;
+  // ── H-7④ 카운트·배지는 이 응답만(화면에서 다시 세지 않는다) ──
+  const summaryQ = useAlertSummary({ groupBy: 'week' });
+  const expandedRange = expandedWeek ? bucketRange(expandedWeek) : null;
+  const residentGroupsQ = useAlertSummary({
+    groupBy: 'resident',
+    from: expandedRange?.from,
+    to: expandedRange?.to,
+    enabled: !!expandedRange,
+  });
 
-  const { alerts, isLoading, isError, refetch, isFetching } = useAlerts(apiOpts);
+  // ── 카드 목록 소스 — 오늘 표시·입소자 드릴다운 표시(카운트가 아니라 "어떤 카드를 보여줄지") ──
+  const { alerts, isLoading, isError, refetch, isFetching } = useAlerts({ limit: 200 });
   const ackMutation = useAcknowledgeAlert();
+
+  const isToday = useCallback((iso: string) => toKSTDate(iso) === today, [today]);
+  const todaysAlerts = alerts.filter((a) => isToday(a.createdAt));
+  const filteredToday = todaysAlerts.filter((a) =>
+    filter === 'new' ? a.status === 'new' : filter === 'critical' ? a.severity === 'Critical' : true);
+
+  const drillAlerts = residentDrill
+    ? alerts.filter((a) => {
+        const range = bucketRange(residentDrill.bucket);
+        const d = toKSTDate(a.createdAt);
+        return a.residentId === residentDrill.residentId && d >= range.from && d <= range.to;
+      })
+    : [];
 
   // 실증 측정 — 알림/경고 상세 진입(ADR-001 §7). 인지 시간 자체는 서버 Alert.createdAt→
   // acknowledgedAt으로 이미 측정되므로 여기선 화면 진입만 남긴다(residentId·성명 없음).
@@ -101,8 +180,8 @@ export default function AlertsScreen() {
   // 위젯에서 특정 알림 id로 들어온 경우 해당 카드로 스크롤·강조(2초). 목록 직결
   // (id 없음)이면 스크롤 없이 위젯 진입 측정만 남는다.
   useEffect(() => {
-    if (!widgetAlertId || widgetTargetConsumedRef.current || isLoading || alerts.length === 0) return;
-    const found = alerts.some((a) => a.id === widgetAlertId);
+    if (!widgetAlertId || widgetTargetConsumedRef.current || isLoading || filteredToday.length === 0) return;
+    const found = filteredToday.some((a) => a.id === widgetAlertId);
     if (!found) return;
     widgetTargetConsumedRef.current = true;
     setHighlightId(widgetAlertId);
@@ -118,8 +197,10 @@ export default function AlertsScreen() {
     }, 300);
     const clearTimer = setTimeout(() => setHighlightId(null), 2300);
     return () => { clearTimeout(scrollTimer); clearTimeout(clearTimer); };
-  }, [widgetAlertId, alerts, isLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widgetAlertId, filteredToday, isLoading]);
 
+  // 위급 신규(전체 기간, 기간 필터로 감추지 않는다 — 안전 우선) → 즉시 팝업
   useEffect(() => {
     const found = alerts.find(
       (a) => a.severity === 'Critical' && a.status === 'new' && !shownRef.current.has(a.id),
@@ -137,22 +218,66 @@ export default function AlertsScreen() {
     setEmergency(null); void handleAck(id);
   }, [handleAck]);
 
-  const newCount = alerts.filter((a) => a.status === 'new').length;
   const tabs: { key: FilterTab; label: string }[] = [
     { key: 'all', label: '전체' },
     { key: 'new', label: '미처리' },
     { key: 'critical', label: '위급' },
   ];
 
+  const today3 = summaryQ.data?.today ?? null;
+  const overdue = summaryQ.data?.overdueUnhandled ?? null;
+  const weekGroups = summaryQ.data?.groups ?? [];
+  const thisWeekGroup = weekGroups.find((g) => g.key === thisWeekStart) ?? null;
+  const lastWeekGroup = weekGroups.find((g) => g.key === lastWeekStart) ?? null;
+  const olderAgg = weekGroups
+    .filter((g) => g.key !== thisWeekStart && g.key !== lastWeekStart)
+    .reduce((acc, g) => ({ total: acc.total + g.total, unhandled: acc.unhandled + g.unhandled, urgent: acc.urgent + g.urgent }),
+      { total: 0, unhandled: 0, urgent: 0 });
+  const bucketAgg: Record<WeekBucket, { total: number; unhandled: number; urgent: number }> = {
+    this: thisWeekGroup ?? { total: 0, unhandled: 0, urgent: 0 },
+    last: lastWeekGroup ?? { total: 0, unhandled: 0, urgent: 0 },
+    older: olderAgg,
+  };
+
+  // ── 입소자 드릴다운 — 같은 화면 안에서 뒤로 가기만 있는 하위 화면 ──
+  if (residentDrill) {
+    return (
+      <SafeAreaView style={s.container} edges={['bottom']}>
+        <View style={s.drillHeader}>
+          <TouchableOpacity onPress={() => setResidentDrill(null)} style={s.backBtn}>
+            <Text style={s.backBtnTxt}>‹ 뒤로</Text>
+          </TouchableOpacity>
+          <Text style={s.drillTitle}>{residentDrill.residentName} · {BUCKET_LABEL[residentDrill.bucket]}</Text>
+        </View>
+        <ScrollView contentContainerStyle={s.list}>
+          {drillAlerts.length === 0 && (
+            <View style={s.center}><Text style={s.emptyTxt}>이 기간에는 경보가 없습니다</Text></View>
+          )}
+          {drillAlerts.map((a) => (
+            <AlertCard key={a.id} item={a} onAck={handleAck} acking={ackingId === a.id} />
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <>
       <EmergencyAlertModal alert={emergency} onAcknowledge={handleEmergencyAck} />
       <SafeAreaView style={s.container} edges={['bottom']}>
-        {newCount > 0 && (
-          <View style={s.banner}>
-            <Text style={s.bannerTxt}>미처리 알림 {newCount}건</Text>
-          </View>
-        )}
+        {/* ① 오늘 요약 띠 — 숫자는 전부 useAlertSummary(API-2) 응답, 화면에서 다시 세지 않는다 */}
+        <View style={s.summaryBand}>
+          {summaryQ.isLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : summaryQ.isError ? (
+            <Text style={s.summaryErr}>오늘 요약을 불러오지 못했습니다</Text>
+          ) : (
+            <Text style={s.summaryTxt}>
+              오늘 경보 {today3?.total ?? 0} · 미처리 {today3?.unhandled ?? 0} · 위급 {today3?.urgent ?? 0}
+            </Text>
+          )}
+        </View>
+
         <View style={s.filterRow}>
           {tabs.map((tab) => (
             <TouchableOpacity key={tab.key} style={[s.ftab, filter === tab.key && s.ftabOn]} onPress={() => setFilter(tab.key)}>
@@ -160,36 +285,101 @@ export default function AlertsScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={s.list}
-          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => void refetch()} tintColor="#1A5276" />}
+          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); void summaryQ.refetch(); }} tintColor="#1A5276" />}
         >
+          {/* ② 지난 미처리 — 기간 필터로 감추지 않는다(접수 전까지 계속 노출) */}
+          {!!overdue && overdue.count > 0 && (
+            <View style={s.overdueBox}>
+              <Text style={s.overdueTitle}>지난 미처리 {overdue.count}건</Text>
+              {overdue.items.map((a) => (
+                <AlertCard key={a.id} item={a} onAck={handleAck} acking={ackingId === a.id} />
+              ))}
+            </View>
+          )}
+
           {isLoading && (
             <View style={s.center}>
               <ActivityIndicator size="large" color="#1A5276" />
-              <Text style={s.centerTxt}>알림 불러오는 중...</Text>
+              <Text style={s.centerTxt}>경보 불러오는 중...</Text>
             </View>
           )}
           {isError && !isLoading && (
             <View style={s.center}>
-              <Text style={s.errTxt}>알림을 불러오지 못했습니다</Text>
+              <Text style={s.errTxt}>경보를 불러오지 못했습니다</Text>
               <TouchableOpacity onPress={() => void refetch()} style={s.retryBtn}>
                 <Text style={s.retryTxt}>다시 시도</Text>
               </TouchableOpacity>
             </View>
           )}
-          {!isLoading && !isError && alerts.length === 0 && (
-            <View style={s.center}><Text style={s.emptyTxt}>알림이 없습니다</Text></View>
+
+          {/* ③ 오늘 경보 목록 */}
+          {!isLoading && !isError && (
+            <>
+              <Text style={s.sectionTitle}>오늘</Text>
+              {filteredToday.length === 0 && (
+                <View style={s.center}><Text style={s.emptyTxt}>오늘 경보가 없습니다</Text></View>
+              )}
+              {filteredToday.map((a) => {
+                const isHighlighted = highlightId === a.id;
+                return (
+                  <View key={a.id} ref={isHighlighted ? highlightCardRef : undefined}>
+                    <AlertCard item={a} onAck={handleAck} acking={ackingId === a.id} highlighted={isHighlighted} />
+                  </View>
+                );
+              })}
+            </>
           )}
-          {alerts.map((a) => {
-            const isHighlighted = highlightId === a.id;
-            return (
-              <View key={a.id} ref={isHighlighted ? highlightCardRef : undefined}>
-                <AlertCard item={a} onAck={handleAck} acking={ackingId === a.id} highlighted={isHighlighted} />
-              </View>
-            );
-          })}
+
+          {/* ④ 지난 경보 — 주 단위 접힘, 펼치면 입소자별 카운트 */}
+          {!isLoading && !isError && (
+            <View style={s.pastSection}>
+              <Text style={s.sectionTitle}>지난 경보</Text>
+              {(['this', 'last', 'older'] as WeekBucket[]).map((bucket) => {
+                const agg = bucketAgg[bucket];
+                const expanded = expandedWeek === bucket;
+                if (agg.total === 0 && bucket !== 'this') return null; // 0건 버킷은 접힘 목록에도 안 보인다
+                return (
+                  <View key={bucket} style={s.weekGroup}>
+                    <TouchableOpacity
+                      style={s.weekHeader}
+                      onPress={() => setExpandedWeek(expanded ? null : bucket)}
+                    >
+                      <Text style={s.weekLabel}>{BUCKET_LABEL[bucket]}</Text>
+                      <Text style={s.weekCount}>
+                        경보 {agg.total} · 미처리 {agg.unhandled} · 위급 {agg.urgent}
+                      </Text>
+                      <Text style={s.weekChevron}>{expanded ? '▲' : '▼'}</Text>
+                    </TouchableOpacity>
+                    {expanded && (
+                      <View style={s.residentList}>
+                        {residentGroupsQ.isLoading && <ActivityIndicator size="small" color="#1A5276" />}
+                        {residentGroupsQ.isError && <Text style={s.errTxt}>불러오지 못했습니다</Text>}
+                        {!residentGroupsQ.isLoading && !residentGroupsQ.isError && (residentGroupsQ.data?.groups.length ?? 0) === 0 && (
+                          <Text style={s.emptyTxt}>이 기간에는 경보가 없습니다</Text>
+                        )}
+                        {residentGroupsQ.data?.groups.map((g) => (
+                          <TouchableOpacity
+                            key={g.key}
+                            style={s.residentRow}
+                            onPress={() => setResidentDrill({ bucket, residentId: g.key, residentName: g.label })}
+                          >
+                            <Text style={s.residentName}>{g.label}</Text>
+                            <Text style={s.residentCount}>
+                              경보 {g.total} · 미처리 {g.unhandled} · 위급 {g.urgent}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </ScrollView>
       </SafeAreaView>
     </>
@@ -198,8 +388,9 @@ export default function AlertsScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-  banner: { backgroundColor: '#FEE2E2', padding: 12, alignItems: 'center' },
-  bannerTxt: { color: '#DC2626', fontWeight: '700', fontSize: 17 },
+  summaryBand: { backgroundColor: '#1A5276', padding: 14, alignItems: 'center' },
+  summaryTxt: { color: '#fff', fontWeight: '700', fontSize: 17 },
+  summaryErr: { color: '#FCA5A5', fontWeight: '600', fontSize: 15 },
   filterRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   ftab: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6' },
   ftabOn: { backgroundColor: '#1A5276' },
@@ -212,6 +403,7 @@ const s = StyleSheet.create({
   retryBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#1A5276', borderRadius: 8 },
   retryTxt: { color: '#fff', fontWeight: '600' },
   emptyTxt: { color: '#9CA3AF', fontSize: 18 },
+  sectionTitle: { fontSize: 20, fontWeight: '700', color: '#111827', marginTop: 8, marginBottom: 4 },
   card: { borderRadius: 12, borderWidth: 1.5, padding: 14, gap: 6 },
   // 위젯 딥링크 진입 강조 — 2초간
   cardHighlight: { borderColor: '#1A5276', borderWidth: 3 },
@@ -226,4 +418,26 @@ const s = StyleSheet.create({
   ackBtnOff: { opacity: 0.6 },
   ackTxt: { color: '#fff', fontWeight: '600', fontSize: 16 },
   doneT: { fontSize: 15, color: '#6B7280', fontWeight: '600', marginTop: 4 },
+
+  // ② 지난 미처리
+  overdueBox: { backgroundColor: '#FEF3C7', borderColor: '#FBBF24', borderWidth: 1.5, borderRadius: 12, padding: 12, gap: 10 },
+  overdueTitle: { fontSize: 18, fontWeight: '700', color: '#B45309' },
+
+  // ④ 지난 경보 — 주 버킷
+  pastSection: { marginTop: 8, gap: 8 },
+  weekGroup: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden' },
+  weekHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, minHeight: 56 },
+  weekLabel: { fontSize: 17, fontWeight: '700', color: '#111827' },
+  weekCount: { flex: 1, fontSize: 14, color: '#6B7280', textAlign: 'right' },
+  weekChevron: { fontSize: 14, color: '#9CA3AF' },
+  residentList: { borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 8, gap: 4 },
+  residentRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, minHeight: 44 },
+  residentName: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  residentCount: { fontSize: 14, color: '#6B7280' },
+
+  // 입소자 드릴다운
+  drillHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  backBtn: { minHeight: 44, minWidth: 64, justifyContent: 'center' },
+  backBtnTxt: { fontSize: 17, color: '#1A5276', fontWeight: '700' },
+  drillTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
 });

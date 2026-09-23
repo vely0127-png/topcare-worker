@@ -2,7 +2,7 @@ import { RoleHome, type QuickAction } from '@/components/RoleHome';
 
 // 원장/센터장 — 운영 관리. 앱은 현장 확인용, 청구·리포트는 웹이 정본.
 const ACTIONS: QuickAction[] = [
-  { key: 'alerts', label: '실시간 알림', href: '/(tabs)/alerts', hint: '낙상·바이탈 긴급', icon: 'bell-alert', primary: true },
+  { key: 'alerts', label: '실시간 경보', href: '/(tabs)/alerts', hint: '낙상·바이탈 긴급', icon: 'bell-alert', primary: true }, // H-7⑤(2026-09-23) 용어 정본
   // 2026-08-23: 운영 관리 홈에도 공동 작업판 입구 (현장 확인이 앱의 역할)
   { key: 'workboard', label: '공동 작업판', href: '/(tabs)/workboard', hint: '지금 이 시간, 누가 무엇을 했는지', icon: 'view-dashboard' },
   { key: 'vitals', label: '바이탈 현황', href: '/(tabs)/vitals', hint: '입소자 이상 확인', icon: 'heart-pulse' },

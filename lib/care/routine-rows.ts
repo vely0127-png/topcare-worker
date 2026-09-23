@@ -78,6 +78,9 @@ export function buildRoutineSchedules(args: {
         severity: 'normal',
         isActive: true,
         note: item.activity,
+        // H-8(2026-09-23): 가상행(시설 일과표 파생) = 웹 기본서비스 설계의 'template' 출처.
+        // 일괄 완료가 개인 계획(assessment)만 제외하므로 가상행은 계속 대상에 남는다.
+        source: 'template',
       });
     }
   }

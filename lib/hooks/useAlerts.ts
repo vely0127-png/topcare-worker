@@ -119,6 +119,50 @@ export function useAcknowledgeAlert() {
   });
 }
 
+// ── H-7(2026-09-23) 경보 요약 — API-2 GET /api/alerts/summary ──────
+// 계약: TopCare_워커앱_핫픽스_2.4.3_설계_20260923.md "2.4.4 착수 계약" API-2.
+// 화면(alerts.tsx)은 카운트·배지를 이 응답만 읽는다(화면에서 따로 세지 않는다 — 반복 결함
+// 차단 규약). groupBy='week'는 today/overdueUnhandled와 함께 주 단위 그룹을 준다(펼치기 전
+// 요약), groupBy='resident'(+from/to)는 특정 주 범위를 펼쳤을 때 입소자별 카운트를 준다.
+export interface AlertSummaryGroup {
+  key: string; // groupBy='week'면 주 시작일(YYYY-MM-DD), 'resident'면 residentId
+  label: string;
+  total: number;
+  unhandled: number;
+  urgent: number;
+}
+export interface AlertSummaryOverdueItem {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  residentId?: string;
+  residentName: string;
+  roomName: string;
+  createdAt: string;
+}
+export interface AlertSummary {
+  today: { total: number; unhandled: number; urgent: number };
+  overdueUnhandled: { count: number; items: AlertSummaryOverdueItem[] };
+  groups: AlertSummaryGroup[];
+}
+
+export function useAlertSummary(params: { from?: string; to?: string; groupBy: 'day' | 'week' | 'resident'; enabled?: boolean }) {
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
+  const qs = new URLSearchParams({ groupBy: params.groupBy });
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  return useQuery<AlertSummary, Error>({
+    queryKey: ['alert-summary', userId, params.groupBy, params.from ?? null, params.to ?? null],
+    queryFn: () => api.get<AlertSummary>(`/api/alerts/summary?${qs}`),
+    staleTime: 20_000,
+    retry: 2,
+    enabled: params.enabled ?? true,
+  });
+}
+
 // ── 해결 mutation ──────────────────────────────────────────────
 export function useResolveAlert() {
   const qc = useQueryClient();

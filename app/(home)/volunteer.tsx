@@ -2,7 +2,7 @@ import { RoleHome, type QuickAction } from '@/components/RoleHome';
 
 // 자원봉사자 — 봉사일지·일정은 앱 미구현. 지금은 공지 확인과 비콘 근접만.
 const ACTIONS: QuickAction[] = [
-  { key: 'alerts', label: '공지 / 알림', href: '/(tabs)/alerts', icon: 'bell', primary: true },
+  { key: 'alerts', label: '공지 / 경보', href: '/(tabs)/alerts', icon: 'bell', primary: true }, // H-7⑤(2026-09-23) 용어 정본
   { key: 'proximity', label: '비콘 근접', href: '/(tabs)/proximity', hint: '출근 인증', icon: 'bluetooth-connect' },
   // 앱 미구현
   { key: 'log', label: '봉사일지', hint: '활동 기록' },

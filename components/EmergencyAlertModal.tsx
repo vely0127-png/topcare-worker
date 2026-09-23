@@ -4,7 +4,7 @@
  * 트리거: severity === 'Critical' (낙상·바이탈 위기)
  * - 전체화면 빨간 오버레이
  * - 진동 패턴 반복
- * - "확인했습니다" 탭으로만 닫힘 (뒤로 버튼 차단)
+ * - "접수" 탭으로만 닫힘 (뒤로 버튼 차단) — H-7⑤(2026-09-23) 용어 정본(경보 접수 버튼은 '접수')
  */
 import { useEffect, useRef, useCallback } from 'react';
 import {
@@ -155,10 +155,10 @@ export default function EmergencyAlertModal({ alert, onAcknowledge }: Props) {
           onPress={handleAcknowledge}
           activeOpacity={0.8}
           accessible
-          accessibilityLabel="긴급 알람 확인했습니다"
+          accessibilityLabel="긴급 경보 접수"
           accessibilityRole="button"
         >
-          <Text style={styles.ackButtonText}>✓ 확인했습니다</Text>
+          <Text style={styles.ackButtonText}>✓ 접수</Text>
         </TouchableOpacity>
 
         <Text style={styles.hint}>버튼을 눌러야 알람이 해제됩니다</Text>
