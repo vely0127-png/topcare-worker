@@ -612,6 +612,30 @@ export default function WorkboardScreen() {
     return out;
   }, [blocks, currentIdx]);
 
+  // PD 실측 후속(2026-09-23) — 기록 없는 시설(TC0001)은 이월이 586건까지 쌓여 펼치면
+  // "지금" 블록이 화면 밖으로 밀렸다. ① 구획 기본 접힘 ② 펼치면 행을 바로 나열하지 않고
+  // 시간대·서비스 그룹으로 먼저 보인다 ③ 그룹 안은 20개+더보기 ④ 일괄 완료 버튼 없음(지난
+  // 시각 기록의 일괄 생성 금지 — 정직 원칙, renderRow가 애초에 그 버튼을 만들지 않는다).
+  const [overdueExpanded, setOverdueExpanded] = useState(false);
+  const [expandedOverdueGroup, setExpandedOverdueGroup] = useState<string | null>(null);
+  const [overdueGroupShowCount, setOverdueGroupShowCount] = useState<Record<string, number>>({});
+  const OVERDUE_GROUP_PAGE = 20;
+
+  const overdueGroups = useMemo(() => {
+    const byKey = new Map<string, { key: string; blockStart: string; serviceType: string; label: string; entries: { row: Row; blockStart: string }[] }>();
+    for (const entry of overdueEntries) {
+      const serviceType = entry.row.schedule.serviceType;
+      const key = `${entry.blockStart}|${serviceType}`;
+      let g = byKey.get(key);
+      if (!g) {
+        g = { key, blockStart: entry.blockStart, serviceType, label: `${entry.blockStart} ${serviceTypeLabel(serviceType)}`, entries: [] };
+        byKey.set(key, g);
+      }
+      g.entries.push(entry);
+    }
+    return [...byKey.values()].sort((a, b) => hhmmToMin(a.blockStart) - hhmmToMin(b.blockStart) || a.label.localeCompare(b.label, 'ko'));
+  }, [overdueEntries]);
+
   const nextBlock = blocks[currentIdx + 1] ?? null;
   const minutesToNextBlock = nextBlock ? hhmmToMin(nextBlock.start) - nowMin : null;
   const nowHH = String(Math.floor(nowMin / 60)).padStart(2, '0');
@@ -737,16 +761,67 @@ export default function WorkboardScreen() {
           </View>
         )}
 
-        {/* H-6 대표 추가(09-23) — 이월 구획. 0건이면 구획 자체를 렌더하지 않는다(가짜 "모두 완료" 금지) */}
+        {/* H-6 대표 추가(09-23) — 이월 구획. 0건이면 구획 자체를 렌더하지 않는다(가짜 "모두 완료" 금지).
+            PD 실측 후속(09-23) — TC0001처럼 기록 없는 시설은 수백 건이 쌓여 펼치면 "지금" 블록이
+            화면 밖으로 밀린다 → 기본 접힘(헤더 1줄) + 펼쳐도 행이 아니라 시간대·서비스 그룹 먼저.
+            일괄 완료 버튼은 두지 않는다(지난 시각 기록의 일괄 생성 금지 — renderRow는 그 버튼을
+            만들지 않으므로 구조상 없음). */}
         {!isLoading && !isError && overdueEntries.length > 0 && (
           <View style={st.overdueBox}>
-            <Text style={st.overdueTitle}>지난 시간대 미완료 {overdueEntries.length}건</Text>
-            {overdueEntries.map(({ row, blockStart }) => renderRow(row, blockStart, { showOriginalTime: true }))}
+            <TouchableOpacity
+              style={st.overdueHeaderRow}
+              onPress={() => setOverdueExpanded((v) => !v)}
+              accessibilityRole="button"
+            >
+              <Text style={st.overdueTitle}>지난 시간대 미완료 {overdueEntries.length}건</Text>
+              <Text style={st.overdueChevron}>{overdueExpanded ? '▲' : '▸'}</Text>
+            </TouchableOpacity>
+            {overdueExpanded && (
+              <View style={st.overdueGroupList}>
+                {overdueGroups.map((g) => {
+                  const groupExpanded = expandedOverdueGroup === g.key;
+                  const showCount = overdueGroupShowCount[g.key] ?? OVERDUE_GROUP_PAGE;
+                  const visible = g.entries.slice(0, showCount);
+                  return (
+                    <View key={g.key} style={st.overdueGroup}>
+                      <TouchableOpacity
+                        style={st.overdueGroupHeader}
+                        onPress={() => setExpandedOverdueGroup(groupExpanded ? null : g.key)}
+                      >
+                        <Text style={st.overdueGroupLabel}>{g.label} {g.entries.length}건</Text>
+                        <Text style={st.overdueChevron}>{groupExpanded ? '▲' : '▸'}</Text>
+                      </TouchableOpacity>
+                      {groupExpanded && (
+                        <View style={st.overdueGroupRows}>
+                          {visible.map(({ row, blockStart }) => renderRow(row, blockStart, { showOriginalTime: true }))}
+                          {g.entries.length > showCount && (
+                            <TouchableOpacity
+                              style={st.overdueMoreBtn}
+                              onPress={() => setOverdueGroupShowCount((prev) => ({ ...prev, [g.key]: showCount + OVERDUE_GROUP_PAGE }))}
+                            >
+                              <Text style={st.overdueMoreText}>더 보기 ({g.entries.length - showCount}건 남음)</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
         )}
 
-        {blocks.map((block, i) => {
-          const isCurrent = i === currentIdx;
+        {/*
+          PD 실측 후속(2026-09-23) — showAllBlocks=false(위젯 focus 모드)일 때 blocks 전체를
+          그대로 돌리면 지난 블록들이 "헤더만 접힘"으로도 하나하나 쌓여 현재 블록이 화면 밖으로
+          밀린다(586건 이월 사고의 다른 얼굴). 지난 블록의 내용은 이미 위 이월 구획이 전부
+          대표하므로, focus 모드에서는 **현재 블록부터** 렌더한다 — "이월 헤더 접힘 + 현재 블록
+          헤더"가 항상 첫 화면 안에 오도록(요구사항 ⑤). 전체 보기(showAllBlocks=true)는 기존대로
+          모든 블록(과거 포함)을 처음부터 보여준다.
+        */}
+        {(showAllBlocks ? blocks : blocks.slice(currentIdx)).map((block) => {
+          const isCurrent = block.start === blocks[currentIdx]?.start;
           const isExpanded = showAllBlocks || isCurrent;
           const doneCount = block.rows.filter((r) => r.done && !isExceptionRecord(r.done)).length;
           const exceptionCount = block.rows.filter((r) => isExceptionRecord(r.done)).length;
@@ -754,6 +829,7 @@ export default function WorkboardScreen() {
           const eligibleRows = remainingRows.filter(isBulkEligible);
           const excludedCount = remainingRows.length - eligibleRows.length;
           const flow = bulkFlow[block.start];
+          const showExcludedTag = (flow ? flow.excluded : excludedCount) > 0;
           return (
             <View
               key={block.start}
@@ -769,25 +845,29 @@ export default function WorkboardScreen() {
                 </Text>
               </View>
 
-              {/* H-8① — [남은 N건 모두 완료]를 블록 헤더로 이동(93행 스크롤 없이 바로 보임) */}
-              {isExpanded && (flow || eligibleRows.length > 0) && (
+              {/* H-8① — [남은 N건 모두 완료]를 블록 헤더로 이동(93행 스크롤 없이 바로 보임).
+                  PD 실측 후속 — "제외 n건" 라벨은 대상 0건(투약·개인계획만 남은 블록)이어도
+                  버튼과 별개로 항상 보인다(이전엔 버튼과 함께 숨어 "제외됐는지 0건인지" 구분이 안 됐다). */}
+              {isExpanded && (flow || eligibleRows.length > 0 || showExcludedTag) && (
                 <View style={st.headerActionRow}>
-                  <TouchableOpacity
-                    style={st.allDoneBtn}
-                    disabled={!!flow}
-                    onPress={() => startBulkComplete(block)}
-                  >
-                    {flow ? (
-                      <View style={st.allDoneBtnRow}>
-                        <ActivityIndicator size="small" color={COLOR.onPrimary} />
-                        <Text style={st.allDoneText}>{flow.done}/{flow.total} 저장 중</Text>
-                      </View>
-                    ) : (
-                      <Text style={st.allDoneText}>남은 {eligibleRows.length}건 모두 완료</Text>
-                    )}
-                  </TouchableOpacity>
-                  {(flow ? flow.excluded : excludedCount) > 0 && (
-                    <Text style={st.excludedTag}>제외 {flow ? flow.excluded : excludedCount}건(예외/투약)</Text>
+                  {(flow || eligibleRows.length > 0) && (
+                    <TouchableOpacity
+                      style={st.allDoneBtn}
+                      disabled={!!flow}
+                      onPress={() => startBulkComplete(block)}
+                    >
+                      {flow ? (
+                        <View style={st.allDoneBtnRow}>
+                          <ActivityIndicator size="small" color={COLOR.onPrimary} />
+                          <Text style={st.allDoneText}>{flow.done}/{flow.total} 저장 중</Text>
+                        </View>
+                      ) : (
+                        <Text style={st.allDoneText}>남은 {eligibleRows.length}건 모두 완료</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  {showExcludedTag && (
+                    <Text style={st.excludedTag}>제외 {flow ? flow.excluded : excludedCount}건(예외/투약/개인계획)</Text>
                   )}
                 </View>
               )}
@@ -934,7 +1014,17 @@ const st = StyleSheet.create({
 
   // H-6 — 이월 구획("지난 시간대 미완료 N건")
   overdueBox: { backgroundColor: COLOR.warningBg, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.lg, borderWidth: 1, borderColor: COLOR.caution },
-  overdueTitle: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.caution, marginBottom: SPACE.md },
+  overdueTitle: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.caution },
+  // PD 실측 후속(09-23) — 기본 접힘 헤더 + 펼쳤을 때 시간대·서비스 그룹
+  overdueHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: TOUCH.min },
+  overdueChevron: { fontSize: FONT.body, fontWeight: '700', color: COLOR.caution },
+  overdueGroupList: { marginTop: SPACE.md, gap: SPACE.sm },
+  overdueGroup: { backgroundColor: COLOR.surface, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.border, overflow: 'hidden' },
+  overdueGroupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: TOUCH.min, paddingHorizontal: SPACE.md },
+  overdueGroupLabel: { fontSize: FONT.label, fontWeight: '700', color: COLOR.text },
+  overdueGroupRows: { borderTopWidth: 1, borderTopColor: COLOR.border, padding: SPACE.sm, gap: SPACE.xs },
+  overdueMoreBtn: { minHeight: TOUCH.min, alignItems: 'center', justifyContent: 'center' },
+  overdueMoreText: { fontSize: FONT.label, fontWeight: '700', color: COLOR.primary },
 
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: SPACE.xl },
   modalCard: { backgroundColor: COLOR.surface, borderRadius: RADIUS.lg, padding: SPACE.xl, gap: SPACE.md },

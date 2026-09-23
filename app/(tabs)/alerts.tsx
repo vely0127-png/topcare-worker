@@ -27,8 +27,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { useLocalSearchParams } from 'expo-router';
 import {
-  useAlerts, useAcknowledgeAlert, useAlertSummary,
-  type AlertItem, type AlertSeverity, type AlertSummaryOverdueItem,
+  useAlerts, useAcknowledgeAlert, useAlertSummary, normalizeOverdueItem,
+  type AlertItem, type AlertSeverity,
 } from '@/lib/hooks/useAlerts';
 import { toKSTDate, getKSTToday } from '@/lib/utils/date';
 import EmergencyAlertModal from '@/components/EmergencyAlertModal';
@@ -42,10 +42,20 @@ const SEV_CFG: Record<AlertSeverity, SeverityConfig> = {
   Medium: { bg: '#FFFBEB', border: '#FCD34D', text: '#D97706', label: 'ef' },
   Low: { bg: '#F0FDF4', border: '#86EFAC', text: '#16A34A', label: 'ld' },
 };
+// P1 크래시 수정(2026-09-23 PD 실측) — "Cannot read property 'bg' of undefined".
+// 원인은 overdueUnhandled.items가 AlertItem과 다른 계약(level만 있고 severity 없음)인데
+// 그대로 SEV_CFG[item.severity]를 조회해 undefined가 나온 것(정규화는 아래에서 고쳤다).
+// 여기서는 그와 별개로 스타일 맵 조회 자체를 항상 폴백시킨다 — 앞으로 어떤 값이 들어와도
+// 절대 크래시하지 않는다(대표 지시 "스타일 맵 조회는 항상 폴백").
+const DEFAULT_SEV_CFG: SeverityConfig = { bg: '#F3F4F6', border: '#D1D5DB', text: '#374151', label: 'na' };
+const sevCfg = (sev: AlertSeverity | string | undefined | null): SeverityConfig =>
+  (sev && SEV_CFG[sev as AlertSeverity]) || DEFAULT_SEV_CFG;
 
 const SEV_LABELS: Record<AlertSeverity, string> = {
   Critical: '위급', High: '높음', Medium: '보통', Low: '낮음',
 };
+const sevLabel = (sev: AlertSeverity | string | undefined | null): string =>
+  (sev && SEV_LABELS[sev as AlertSeverity]) || '알 수 없음';
 
 // P1(2026-07-27): DB alertType 실제 값 기준으로 교체 — 이전 키(FALL_DETECTED 등)는
 // IoT 이벤트명이라 어떤 알림에도 매칭되지 않아 라벨이 항상 fallback이었다.
@@ -84,22 +94,22 @@ type FilterTab = 'all' | 'new' | 'critical';
 type WeekBucket = 'this' | 'last' | 'older';
 const BUCKET_LABEL: Record<WeekBucket, string> = { this: '이번 주', last: '지난 주', older: '그 이전' };
 
-interface CardProps { item: AlertItem | AlertSummaryOverdueItem; onAck: (id: string) => void; acking: boolean; highlighted?: boolean; }
+interface CardProps { item: AlertItem; onAck: (id: string) => void; acking: boolean; highlighted?: boolean; }
 
 function AlertCard({ item, onAck, acking, highlighted }: CardProps) {
-  const cfg = SEV_CFG[item.severity];
+  const cfg = sevCfg(item.severity);
   const title = TYPE_LABELS[item.type] ?? item.title;
   const isNew = item.status === 'new';
   return (
     <View style={[s.card, { backgroundColor: cfg.bg, borderColor: cfg.border }, highlighted && s.cardHighlight]}>
       <View style={s.row}>
         <View style={[s.badge, { backgroundColor: cfg.text }]}>
-          <Text style={s.badgeTxt}>{SEV_LABELS[item.severity]}</Text>
+          <Text style={s.badgeTxt}>{sevLabel(item.severity)}</Text>
         </View>
         <Text style={s.timeT}>{relTime(item.createdAt)}</Text>
       </View>
       <Text style={s.titleT}>{title}</Text>
-      <Text style={s.subT}>{item.residentName} / {item.roomName}</Text>
+      <Text style={s.subT}>{item.residentName}{item.roomName ? ` / ${item.roomName}` : ''}</Text>
       {!!item.description && <Text style={s.descT}>{item.description}</Text>}
       {isNew && (
         // H-7⑤ 용어 정본 — "확인했습니다" → "접수"(경보 접수 버튼은 '접수', 2026-09-16 동음이의 해소)
@@ -296,7 +306,8 @@ export default function AlertsScreen() {
             <View style={s.overdueBox}>
               <Text style={s.overdueTitle}>지난 미처리 {overdue.count}건</Text>
               {overdue.items.map((a) => (
-                <AlertCard key={a.id} item={a} onAck={handleAck} acking={ackingId === a.id} />
+                // P1(2026-09-23) — 원시 API-2 계약(level만 있음)을 AlertCard 모양으로 정규화한 뒤에만 넘긴다.
+                <AlertCard key={a.id} item={normalizeOverdueItem(a)} onAck={handleAck} acking={ackingId === a.id} />
               ))}
             </View>
           )}
