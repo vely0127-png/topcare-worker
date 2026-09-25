@@ -67,6 +67,7 @@ import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 import ServiceDetailSheet, { type ServiceDetailSheetResult } from '@/components/care/ServiceDetailSheet';
 import { composeSelectionNote, isExceptionNote } from '@/lib/data/service-detail-options';
 import { UndoToast } from '@/components/common/UndoToast';
+import { DeepLinkNotice } from '@/components/common/DeepLinkNotice';
 
 /**
  * 서비스 상세 시트(#23, 2026-09-11) — 10종 전부 공용 ServiceDetailSheet 로 통일.
@@ -136,6 +137,10 @@ type Row = {
 };
 type Block = { start: string; rows: Row[] };
 
+/** 라우터 파라미터 정규화 — 같은 키가 배열로 올 수 있다(useWidgetEntryMeasure와 같은 방어). */
+const firstParam = (v: string | string[] | undefined): string | null =>
+  (Array.isArray(v) ? v[0] : v) || null;
+
 export default function WorkboardScreen() {
   const session = useSession();
   const staffId = session?.user.staffId ?? null;
@@ -158,7 +163,17 @@ export default function WorkboardScreen() {
   const blockRefs = useRef<Record<string, View | null>>({});
   const [highlightRowKey, setHighlightRowKey] = useState<string | null>(null);
   const [highlightBlockStart, setHighlightBlockStart] = useState<string | null>(null);
-  const widgetTargetConsumedRef = useRef(false);
+  // Q22-10a(2026-09-25) — 처리한 딥링크를 boolean이 아니라 파라미터 키로 기억한다. boolean이면
+  // 앱이 떠 있는 채(warm) 위젯에서 다른 행을 열었을 때 두 번째 딥링크를 무시했다.
+  const widgetConsumedKeyRef = useRef<string | null>(null);
+  // 강조 대상이 이월 구획 안의 행 사본인지(같은 행이 전체 보기에서는 블록 안에도 그려진다 —
+  // ref를 한쪽에만 달아야 스크롤 위치가 하나로 정해진다).
+  const [highlightInOverdue, setHighlightInOverdue] = useState(false);
+  // 위젯 focus 모드에서 접혀 있는 미래 블록을 대상 행 때문에 펼친 경우 그 블록 시작 시각.
+  const [forcedExpandedBlock, setForcedExpandedBlock] = useState<string | null>(null);
+  // 딥링크 대상 행이 오늘 작업판에 없을 때 상단 인라인 안내(자동 제거 없음 — [닫기]까지 유지).
+  const [widgetNotFound, setWidgetNotFound] = useState(false);
+  const widgetTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   // H-6 표현 개선 — block=now(또는 entry=widget) 진입 시 현재 블록만 펼치고 나머지는
   // 헤더만 접는다. 일반 진입(홈 탭 클릭)은 항상 전체 펼침(showAllBlocks=true, 기존 동작 그대로).
   // useWidgetEntryMeasure와 같은 배열 방어(라우터가 같은 파라미터를 배열로 줄 수 있음).
@@ -270,65 +285,37 @@ export default function WorkboardScreen() {
 
   // 위젯 딥링크 매칭 — scheduleId(정확한 행) > residentId(그 입소자의 첫 행) >
   // block==='now'(현재 블록 컨테이너만, 특정 행 없음) 순으로 찾는다.
+  // Q22-10a(2026-09-25): scheduleId를 줬는데 그 행이 없으면 residentId의 다른 행으로 대체하지
+  // 않는다 — null을 돌려 "찾을 수 없음" 인라인 안내를 띄운다(엉뚱한 행 강조 = 가짜 성공).
+  const targetScheduleId = firstParam(widgetScheduleId);
+  const targetResidentId = firstParam(widgetResidentId);
+  const targetBlock = firstParam(widgetBlock);
+  const widgetTargetKey = targetScheduleId || targetResidentId || targetBlock
+    ? `${targetScheduleId ?? ''}|${targetResidentId ?? ''}|${targetBlock ?? ''}`
+    : null;
   const widgetTarget = useMemo(() => {
-    if (!widgetScheduleId && !widgetResidentId && !widgetBlock) return null;
-    if (widgetScheduleId) {
-      for (const b of blocks) {
-        const row = b.rows.find((r) => r.schedule.id === widgetScheduleId);
-        if (row) return { rowKey: row.schedule.id as string | null, blockStart: b.start };
+    if (!targetScheduleId && !targetResidentId && !targetBlock) return null;
+    const hit = (b: Block, blockIdx: number, row: Row) =>
+      ({ rowKey: row.schedule.id as string | null, blockStart: b.start, blockIdx, done: !!row.done });
+    if (targetScheduleId) {
+      for (let i = 0; i < blocks.length; i++) {
+        const row = blocks[i].rows.find((r) => r.schedule.id === targetScheduleId);
+        if (row) return hit(blocks[i], i, row);
       }
+      return null;
     }
-    if (widgetResidentId) {
-      for (const b of blocks) {
-        const row = b.rows.find((r) => r.schedule.residentId === widgetResidentId);
-        if (row) return { rowKey: row.schedule.id as string | null, blockStart: b.start };
+    if (targetResidentId) {
+      for (let i = 0; i < blocks.length; i++) {
+        const row = blocks[i].rows.find((r) => r.schedule.residentId === targetResidentId);
+        if (row) return hit(blocks[i], i, row);
       }
+      return null;
     }
-    if (widgetBlock === 'now' && blocks[currentIdx]) {
-      return { rowKey: null as string | null, blockStart: blocks[currentIdx].start };
+    if (targetBlock === 'now' && blocks[currentIdx]) {
+      return { rowKey: null as string | null, blockStart: blocks[currentIdx].start, blockIdx: currentIdx, done: false };
     }
     return null;
-  }, [widgetScheduleId, widgetResidentId, widgetBlock, blocks, currentIdx]);
-
-  // 데이터가 도착한 뒤 1회만 스크롤·강조(재조회로 blocks가 새 참조로 바뀌어도 재실행 안 함).
-  useEffect(() => {
-    if (!widgetTarget || widgetTargetConsumedRef.current || blocks.length === 0) return;
-    widgetTargetConsumedRef.current = true;
-    setHighlightRowKey(widgetTarget.rowKey);
-    setHighlightBlockStart(widgetTarget.blockStart);
-    const scrollTimer = setTimeout(() => {
-      const handle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
-      if (!handle) return;
-      // 특정 행이 있으면(scheduleId·residentId 진입) 기존대로 그 행으로 스크롤한다.
-      if (widgetTarget.rowKey && highlightRowRef.current) {
-        highlightRowRef.current.measureLayout(
-          handle,
-          (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(y - 120, 0), animated: true }),
-          () => { /* 레이아웃 측정 실패 — 스크롤 없이 강조만 유지 */ },
-        );
-        return;
-      }
-      // H-6 결함 수정 — block=now(특정 행 없음)는 블록 컨테이너 ref로 스크롤한다.
-      // 레이아웃이 아직 안 잡혔을 수 있어(방금 도착한 데이터) measureLayout 실패 시
-      // 한 번 더 시도(레이아웃 완료 후) — 그래도 실패하면 강조만 유지한다(정직하게 실패).
-      const blockEl = blockRefs.current[widgetTarget.blockStart];
-      if (blockEl) {
-        const tryMeasure = (retry: boolean) => {
-          blockEl.measureLayout(
-            handle,
-            (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true }),
-            () => { if (retry) setTimeout(() => tryMeasure(false), 250); },
-          );
-        };
-        tryMeasure(true);
-      }
-    }, 300);
-    const clearTimer = setTimeout(() => {
-      setHighlightRowKey(null);
-      setHighlightBlockStart(null);
-    }, 2300);
-    return () => { clearTimeout(scrollTimer); clearTimeout(clearTimer); };
-  }, [widgetTarget, blocks.length]);
+  }, [targetScheduleId, targetResidentId, targetBlock, blocks, currentIdx]);
 
   const nowIso = () => {
     const d = new Date(Date.now() + 9 * 3600_000);
@@ -645,13 +632,93 @@ export default function WorkboardScreen() {
     return [...byKey.values()].sort((a, b) => hhmmToMin(a.blockStart) - hhmmToMin(b.blockStart) || a.label.localeCompare(b.label, 'ko'));
   }, [overdueEntries]);
 
+  // ── Q22-10a(2026-09-25) 위젯 딥링크 → 대상 행 스크롤·강조 ──
+  // alerts.tsx 경보 강조와 같은 방식(ref + measureLayout + scrollTo + 강조 스타일 + 일정 시간 후 해제).
+  // 2.4.5까지 "작업판에 열리기만 하고 행으로 안 감"(QA22 #6)의 원인 3가지:
+  //   ① 위젯 진입은 focus 모드라 현재 블록만 펼쳐진다 — 대상 행이 지난 블록(접힌 이월 구획)이나
+  //      미래 블록(헤더만)에 있으면 행이 렌더되지 않아 ref가 비고 스크롤이 실행되지 않았다.
+  //   ② 네 쿼리가 따로 도착하거나 20초 폴링으로 blocks가 바뀌면 effect cleanup이 스크롤·해제 타이머를
+  //      지웠다(1회 소비 플래그 때문에 재실행도 없음) — 타이머를 ref로 옮겨 언마운트 때만 지운다.
+  //   ③ 1회 소비가 boolean이라 warm 상태에서 두 번째 딥링크를 무시했다 — 파라미터 키로 기억한다.
+  useEffect(() => () => { widgetTimersRef.current.forEach(clearTimeout); }, []);
+
+  useEffect(() => {
+    if (!widgetTargetKey || widgetConsumedKeyRef.current === widgetTargetKey) return;
+    // 판을 다 읽기 전에는 판정하지 않는다. 조회 실패면 "없음"이라고 말하지 않는다(오류 배너가 이미 있다).
+    if (isLoading || isError) return;
+    widgetConsumedKeyRef.current = widgetTargetKey;
+    widgetTimersRef.current.forEach(clearTimeout);
+    widgetTimersRef.current = [];
+
+    if (!widgetTarget) {
+      // block=now만 온 경우(특정 행 아님)는 안내 대상이 아니다.
+      setWidgetNotFound(!!(targetScheduleId || targetResidentId));
+      return;
+    }
+    setWidgetNotFound(false);
+
+    const { rowKey, blockStart, blockIdx, done } = widgetTarget;
+    // 대상 행이 보이도록 구획을 먼저 펼친다(focus 모드에서만 접혀 있다).
+    let inOverdue = false;
+    if (rowKey && !showAllBlocks) {
+      if (blockIdx < currentIdx && !done) {
+        // 지난 시간대 미완료 → 이월 구획 → 그 시간대·서비스 그룹 → 그 행이 보이는 페이지까지 펼친다.
+        const targetRow = blocks[blockIdx].rows.find((r) => r.schedule.id === rowKey);
+        const groupKey = `${blockStart}|${targetRow?.schedule.serviceType ?? ''}`;
+        const group = overdueGroups.find((g) => g.key === groupKey);
+        const idxInGroup = group ? group.entries.findIndex((e) => e.row.schedule.id === rowKey) : -1;
+        inOverdue = true;
+        setOverdueExpanded(true);
+        setExpandedOverdueGroup(groupKey);
+        if (idxInGroup >= 0) {
+          const need = Math.ceil((idxInGroup + 1) / OVERDUE_GROUP_PAGE) * OVERDUE_GROUP_PAGE;
+          setOverdueGroupShowCount((prev) => ({ ...prev, [groupKey]: Math.max(prev[groupKey] ?? OVERDUE_GROUP_PAGE, need) }));
+        }
+      } else if (blockIdx < currentIdx) {
+        // 지난 시간대 완료 행은 이월 구획에 없다 — 전체 보기로 전환해 그 블록을 그린다.
+        setShowAllBlocks(true);
+      } else if (blockIdx > currentIdx) {
+        // 미래 블록은 focus 모드에서 헤더만 보인다 — 그 블록 하나만 펼친다(focus 유지).
+        setForcedExpandedBlock(blockStart);
+      }
+    }
+    setHighlightInOverdue(inOverdue);
+    setHighlightRowKey(rowKey);
+    setHighlightBlockStart(blockStart);
+
+    const later = (fn: () => void, ms: number) => { widgetTimersRef.current.push(setTimeout(fn, ms)); };
+    const clearHighlight = () => { setHighlightRowKey(null); setHighlightBlockStart(null); };
+    // 펼친 구획이 그려진 뒤 측정한다 — 아직 안 그려졌거나 측정 실패면 250ms 간격으로 최대 4번 더.
+    // 끝내 실패하면 스크롤 없이 강조만 보여 주고 해제한다(정직하게 실패).
+    const tryScroll = (attempt: number) => {
+      const handle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+      const el = rowKey ? highlightRowRef.current : blockRefs.current[blockStart];
+      const retryOrGiveUp = () => {
+        if (attempt < 4) later(() => tryScroll(attempt + 1), 250);
+        else later(clearHighlight, 2000);
+      };
+      if (!handle || !el) { retryOrGiveUp(); return; }
+      el.measureLayout(
+        handle,
+        (_x, y) => {
+          scrollRef.current?.scrollTo({ y: Math.max(y - (rowKey ? 120 : 24), 0), animated: true });
+          later(clearHighlight, 2000);
+        },
+        retryOrGiveUp,
+      );
+    };
+    later(() => tryScroll(0), 300);
+    // 판정·펼침은 딥링크 1건당 1회 — 다른 값(showAllBlocks·overdueGroups 등)의 변화로 다시 돌지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widgetTargetKey, widgetTarget, isLoading, isError]);
+
   const nextBlock = blocks[currentIdx + 1] ?? null;
   const minutesToNextBlock = nextBlock ? hhmmToMin(nextBlock.start) - nowMin : null;
   const nowHH = String(Math.floor(nowMin / 60)).padStart(2, '0');
   const nowMM = String(nowMin % 60).padStart(2, '0');
 
   /** 행 1개 렌더 — 정상 블록·이월 구획이 함께 쓴다(복제 금지, 렌더 로직 1곳). */
-  const renderRow = (row: Row, blockStart: string, opts?: { showOriginalTime?: boolean }) => {
+  const renderRow = (row: Row, blockStart: string, opts?: { showOriginalTime?: boolean; inOverdue?: boolean }) => {
     const saving = savingIds.has(row.schedule.id);
     const done = row.done;
     const isException = isExceptionRecord(done);
@@ -661,7 +728,8 @@ export default function WorkboardScreen() {
     // H-8②③ — bulk 낙관 체크(회색)·bulk 실패 되돌림(빈 원+테두리 강조)
     const isBulkChecked = !done && !!bulkChecked[blockStart]?.has(row.schedule.id);
     const isBulkFailed = !done && !!bulkFailed[blockStart]?.has(row.schedule.id);
-    const isHighlighted = highlightRowKey === row.schedule.id;
+    // 같은 행이 이월 구획과 (전체 보기의) 블록에 두 번 그려질 수 있다 — 딥링크가 고른 쪽에만 강조·ref.
+    const isHighlighted = highlightRowKey === row.schedule.id && highlightInOverdue === !!opts?.inOverdue;
     return (
       <View key={row.schedule.id} style={st.rowWrap} ref={isHighlighted ? highlightRowRef : undefined}>
         <TouchableOpacity
@@ -730,6 +798,13 @@ export default function WorkboardScreen() {
 
   return (
     <SafeAreaView style={st.safe} edges={['bottom']}>
+      {/* Q22-10a — 위젯에서 연 일정이 오늘 판에 없을 때 상단 인라인 1줄(자동 제거 없음, [닫기]까지) */}
+      {widgetNotFound && (
+        <DeepLinkNotice
+          message="위젯에서 연 일정을 오늘 작업판에서 찾을 수 없습니다(이미 처리됐거나 기간 밖)"
+          onDismiss={() => setWidgetNotFound(false)}
+        />
+      )}
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={st.scroll}
@@ -802,7 +877,7 @@ export default function WorkboardScreen() {
                       </TouchableOpacity>
                       {groupExpanded && (
                         <View style={st.overdueGroupRows}>
-                          {visible.map(({ row, blockStart }) => renderRow(row, blockStart, { showOriginalTime: true }))}
+                          {visible.map(({ row, blockStart }) => renderRow(row, blockStart, { showOriginalTime: true, inOverdue: true }))}
                           {g.entries.length > showCount && (
                             <TouchableOpacity
                               style={st.overdueMoreBtn}
@@ -831,7 +906,7 @@ export default function WorkboardScreen() {
         */}
         {(showAllBlocks ? blocks : blocks.slice(currentIdx)).map((block) => {
           const isCurrent = block.start === blocks[currentIdx]?.start;
-          const isExpanded = showAllBlocks || isCurrent;
+          const isExpanded = showAllBlocks || isCurrent || block.start === forcedExpandedBlock;
           const doneCount = block.rows.filter((r) => r.done && !isExceptionRecord(r.done)).length;
           const exceptionCount = block.rows.filter((r) => isExceptionRecord(r.done)).length;
           const remainingRows = block.rows.filter((r) => !r.done);

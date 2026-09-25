@@ -3,13 +3,11 @@
  *
  * 명세 A4 "서비스 → 해당 입소자 기록 화면"의 실제 목적지는 공동 작업판
  * (`app/(tabs)/workboard.tsx`)이다 — 체크(제공기록 생성)가 이뤄지는 화면이 거기뿐이다.
- * 그 파일은 이번 작업 수정 금지 대상이라 residentId/scheduleId를 받아 특정 행으로
- * 스크롤·강조하는 처리는 아직 없다.
  *
- * ⚠ 통합 지점(PD가 넣을 것) — `app/(tabs)/workboard.tsx`가 `useLocalSearchParams()`로
- *   `residentId`·`scheduleId`를 받아 해당 행을 찾아 스크롤(`scroll_to`)·하이라이트하게
- *   할 것. 지금은 워크보드를 열기만 한다(행 강조 없음) — "오탭의 결과는 앱이 열림뿐"
- *   이라는 A4 실수 방지 요건은 충족하지만, "바로 그 행"까지는 아직 아니다.
+ * 통합 완료(2.4.6, Q22-10a 2026-09-25) — workboard.tsx가 `residentId`·`scheduleId`를 받아
+ *   해당 행을 찾고, 접힌 이월 구획·미래 블록이면 먼저 펼친 뒤 스크롤·강조한다(경보 카드 강조와
+ *   같은 방식). scheduleId 행이 오늘 판에 없으면 상단 인라인 안내 1줄을 띄운다.
+ *   이 파일은 파라미터(ID만, 명세 C-8)를 그대로 넘기는 리다이렉트만 담당한다.
  */
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';

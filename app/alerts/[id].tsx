@@ -6,10 +6,10 @@
  * 세션이 작업 중이라 정확한 경로를 알 수 없다). 그래서 지금은 목록으로 보내고
  * id를 쿼리로 넘긴다 — 딥링크 파라미터는 ID만(성명·측정값 금지, C-8 충족).
  *
- * ⚠ 통합 지점(PD가 넣을 것) — 알림 상세 화면이 생기면 아래 Redirect의 href를 그
- *   화면 경로로 바꾸고, 그 화면이 `useLocalSearchParams().id`로 알림을 다시 조회하게
- *   할 것. 그 전까지 대안: `app/(tabs)/alerts.tsx`가 `id` 쿼리를 받아 해당 카드로
- *   스크롤·강조(그 파일도 이번 세션 수정 대상 아님).
+ * 통합 상태(2.4.6, Q22-10b 2026-09-25) — 상세 화면은 설계상 없다(목록 착지). 대신
+ *   `app/(tabs)/alerts.tsx`가 `id` 쿼리로 해당 카드(오늘·지난 미처리)를 스크롤·강조하고,
+ *   로드된 목록에 없으면 상단 인라인 안내 1줄을 띄운다. 상세 화면이 생기면 아래 Redirect의
+ *   href만 그 화면으로 바꾸면 된다.
  */
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';
