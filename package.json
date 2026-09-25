@@ -1,13 +1,14 @@
 {
   "name": "topcare-worker",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release:verify": "node scripts/verify-release-bundle.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.1.3",

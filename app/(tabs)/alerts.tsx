@@ -34,6 +34,7 @@ import { toKSTDate, getKSTToday } from '@/lib/utils/date';
 import EmergencyAlertModal from '@/components/EmergencyAlertModal';
 import { measure } from '@/lib/measure/client';
 import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';
+import { DeepLinkNotice } from '@/components/common/DeepLinkNotice';
 
 type SeverityConfig = { bg: string; border: string; text: string; label: string };
 const SEV_CFG: Record<AlertSeverity, SeverityConfig> = {
@@ -152,7 +153,12 @@ export default function AlertsScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const highlightCardRef = useRef<View>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
-  const widgetTargetConsumedRef = useRef(false);
+  // Q22-10b(2026-09-25) — 처리한 딥링크 id를 기억한다(boolean이면 warm 상태의 두 번째 딥링크를 무시했다).
+  const widgetConsumedIdRef = useRef<string | null>(null);
+  const widgetTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // 딥링크 id가 로드된 목록(오늘·지난 미처리)에 없을 때 상단 인라인 안내 — 자동 제거 없음, [닫기]까지.
+  const [widgetNotFound, setWidgetNotFound] = useState(false);
+  const targetAlertId = (Array.isArray(widgetAlertId) ? widgetAlertId[0] : widgetAlertId) || null;
 
   // ── H-7④ 카운트·배지는 이 응답만(화면에서 다시 세지 않는다) ──
   const summaryQ = useAlertSummary({ groupBy: 'week' });
@@ -197,13 +203,33 @@ export default function AlertsScreen() {
 
   // 위젯에서 특정 알림 id로 들어온 경우 해당 카드로 스크롤·강조(2초). 목록 직결
   // (id 없음)이면 스크롤 없이 위젯 진입 측정만 남는다.
+  // Q22-10b(2026-09-25) 수정 — 강조 방식·타이밍(300ms 뒤 스크롤, 2300ms 뒤 해제)은 그대로 두고:
+  //   ① 대상 범위 = 화면에 그려지는 목록 전부(오늘 + 지난 미처리). 이전엔 오늘 필터 결과만 봐서
+  //      지난 미처리 경보나 오늘 0건일 때는 아무 일도 없었다.
+  //   ② 타이머를 ref로 옮겼다. filteredToday는 렌더마다 새 배열이라, 강조(setHighlightId)로 다시
+  //      렌더되는 순간 effect cleanup이 스크롤·해제 타이머를 지워 스크롤이 실행되지 않고 강조가
+  //      풀리지 않았다(QA22 #6 "경보 목록 착지"의 실체).
+  //   ③ 로드된 목록 어디에도 없으면 상단 인라인 안내 1줄(처리됨 또는 기간 밖).
+  useEffect(() => () => { widgetTimersRef.current.forEach(clearTimeout); }, []);
   useEffect(() => {
-    if (!widgetAlertId || widgetTargetConsumedRef.current || isLoading || filteredToday.length === 0) return;
-    const found = filteredToday.some((a) => a.id === widgetAlertId);
-    if (!found) return;
-    widgetTargetConsumedRef.current = true;
-    setHighlightId(widgetAlertId);
-    const scrollTimer = setTimeout(() => {
+    if (!targetAlertId || widgetConsumedIdRef.current === targetAlertId) return;
+    // 목록·요약(지난 미처리)을 다 읽기 전에는 판정하지 않는다. 목록 조회 실패면 오류 영역이 이미 있다.
+    if (isLoading || isError || summaryQ.isLoading) return;
+    widgetConsumedIdRef.current = targetAlertId;
+    widgetTimersRef.current.forEach(clearTimeout);
+    widgetTimersRef.current = [];
+    const inToday = todaysAlerts.some((a) => a.id === targetAlertId);
+    const inOverdue = (summaryQ.data?.overdueUnhandled?.items ?? []).some((a) => a.id === targetAlertId);
+    if (!inToday && !inOverdue) {
+      setWidgetNotFound(true);
+      return;
+    }
+    setWidgetNotFound(false);
+    // 카드가 실제로 그려지는 상태로 되돌린다 — 입소자 드릴다운 중이거나 필터가 그 카드를 숨기면 해제.
+    setResidentDrill(null);
+    if (inToday && !filteredToday.some((a) => a.id === targetAlertId)) setFilter('all');
+    setHighlightId(targetAlertId);
+    widgetTimersRef.current.push(setTimeout(() => {
       const handle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
       if (handle && highlightCardRef.current) {
         highlightCardRef.current.measureLayout(
@@ -212,11 +238,10 @@ export default function AlertsScreen() {
           () => { /* 레이아웃 측정 실패 — 스크롤 없이 강조만 유지 */ },
         );
       }
-    }, 300);
-    const clearTimer = setTimeout(() => setHighlightId(null), 2300);
-    return () => { clearTimeout(scrollTimer); clearTimeout(clearTimer); };
+    }, 300));
+    widgetTimersRef.current.push(setTimeout(() => setHighlightId(null), 2300));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widgetAlertId, filteredToday, isLoading]);
+  }, [targetAlertId, alerts, isLoading, isError, summaryQ.isLoading, summaryQ.data]);
 
   // 위급 신규(전체 기간, 기간 필터로 감추지 않는다 — 안전 우선) → 즉시 팝업
   useEffect(() => {
@@ -304,6 +329,14 @@ export default function AlertsScreen() {
           ))}
         </View>
 
+        {/* Q22-10b — 위젯에서 연 경보가 로드된 목록에 없을 때 상단 인라인 1줄(자동 제거 없음, [닫기]까지) */}
+        {widgetNotFound && (
+          <DeepLinkNotice
+            message="해당 경보를 목록에서 찾을 수 없습니다(처리됨 또는 기간 밖)"
+            onDismiss={() => setWidgetNotFound(false)}
+          />
+        )}
+
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={s.list}
@@ -313,10 +346,16 @@ export default function AlertsScreen() {
           {!!overdue && overdue.count > 0 && (
             <View style={s.overdueBox}>
               <Text style={s.overdueTitle}>지난 미처리 {overdue.count}건</Text>
-              {overdue.items.map((a) => (
+              {overdue.items.map((a) => {
                 // P1(2026-09-23) — 원시 API-2 계약(level만 있음)을 AlertCard 모양으로 정규화한 뒤에만 넘긴다.
-                <AlertCard key={a.id} item={normalizeOverdueItem(a)} onAck={handleAck} acking={ackingId === a.id} />
-              ))}
+                // Q22-10b — 위젯 딥링크 대상이면 오늘 카드와 같은 ref·강조를 단다.
+                const isHighlighted = highlightId === a.id;
+                return (
+                  <View key={a.id} ref={isHighlighted ? highlightCardRef : undefined}>
+                    <AlertCard item={normalizeOverdueItem(a)} onAck={handleAck} acking={ackingId === a.id} highlighted={isHighlighted} />
+                  </View>
+                );
+              })}
             </View>
           )}
 
