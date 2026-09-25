@@ -68,6 +68,7 @@ import ServiceDetailSheet, { type ServiceDetailSheetResult } from '@/components/
 import { composeSelectionNote, isExceptionNote } from '@/lib/data/service-detail-options';
 import { UndoToast } from '@/components/common/UndoToast';
 import { DeepLinkNotice } from '@/components/common/DeepLinkNotice';
+import { RowActionButton, ROW_ACTION_WIDTH } from '@/components/common/RowActionButton';
 
 /**
  * 서비스 상세 시트(#23, 2026-09-11) — 10종 전부 공용 ServiceDetailSheet 로 통일.
@@ -773,25 +774,24 @@ export default function WorkboardScreen() {
           </View>
           {(saving || undoing) && <ActivityIndicator size="small" color={COLOR.primary} />}
         </TouchableOpacity>
+        {/* G-14(2026-09-25) — 같은 열의 행 버튼은 RowActionButton 1개로 같은 규격. 의미 차이는 variant 색만.
+            버튼이 없는 행(남의 기록·대기 중·일괄 체크 중)도 같은 폭의 빈 자리를 둬 행 카드 폭·열을 맞춘다. */}
         {!done && !isQueued && !isBulkChecked ? (
-          <TouchableOpacity
-            style={st.exceptionBtn}
+          <RowActionButton
+            variant="accent"
+            label={detailButtonLabelFor(row.schedule.serviceType)}
             onPress={() => {
               // 실증 측정 — 상세 시트 열기도 "행 상세 열기"로 센다.
               measure.step('workboard:row');
               setDetailFor(row);
             }}
-          >
-            <Text style={st.exceptionBtnText}>{detailButtonLabelFor(row.schedule.serviceType)}</Text>
-          </TouchableOpacity>
-        ) : done ? (
+          />
+        ) : done && (!staffId || !done.staffId || done.staffId === staffId) ? (
           // ① 되돌리기 — 내가 기록한 건만 (남의 기록은 서버 이전에 화면에서 막는다)
-          (!staffId || !done.staffId || done.staffId === staffId) && (
-            <TouchableOpacity style={st.undoBtn} disabled={undoing} onPress={() => undo(row)}>
-              <Text style={st.undoBtnText}>되돌리기</Text>
-            </TouchableOpacity>
-          )
-        ) : null}
+          <RowActionButton variant="neutral" label="되돌리기" disabled={undoing} onPress={() => undo(row)} />
+        ) : (
+          <View style={{ width: ROW_ACTION_WIDTH }} />
+        )}
       </View>
     );
   };
@@ -1062,8 +1062,6 @@ const st = StyleSheet.create({
   // ⑤ 대기 중(큐) — 완료(초록)·예외(주황)와 구분되는 회색 스타일 관례(itemCard와 동일 규약)
   rowQueued: { backgroundColor: COLOR.bg, borderColor: COLOR.border },
   queuedTag: { fontSize: FONT.caption, color: COLOR.textMuted, fontWeight: '600', marginTop: 2 },
-  undoBtn: { minHeight: TOUCH.min, minWidth: 96, paddingHorizontal: SPACE.md, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLOR.border, alignItems: 'center', justifyContent: 'center' },
-  undoBtnText: { fontSize: FONT.label, color: COLOR.textSub, fontWeight: '700' },
   blockHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, marginBottom: SPACE.md },
   blockTime: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.text },
   nowChip: { fontSize: FONT.caption, fontWeight: '700', color: '#fff', backgroundColor: COLOR.primary, paddingHorizontal: SPACE.sm, paddingVertical: 2, borderRadius: RADIUS.sm, overflow: 'hidden' },
@@ -1075,8 +1073,6 @@ const st = StyleSheet.create({
   rowName: { fontSize: FONT.body, fontWeight: '700', color: COLOR.text },
   rowNameDone: { color: COLOR.textSub },
   rowService: { fontSize: FONT.caption, color: COLOR.textMuted, marginTop: 2 },
-  exceptionBtn: { minWidth: 78, minHeight: TOUCH.min, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.caution, alignItems: 'center', justifyContent: 'center', backgroundColor: COLOR.surface },
-  exceptionBtnText: { fontSize: FONT.label, fontWeight: '700', color: COLOR.caution },
 
   // H-8② — bulk 낙관 체크(회색, 완료·큐 대기와 다른 색) / H-8② bulk 실패 되돌림(빈 원 + 테두리 강조)
   rowBulkChecked: { backgroundColor: COLOR.bg, borderColor: COLOR.borderStrong },
