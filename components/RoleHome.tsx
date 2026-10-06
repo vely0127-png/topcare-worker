@@ -18,6 +18,7 @@ import { WidgetPromoCard } from '@/components/WidgetPromoCard';
 import { WidgetPinButton } from '@/components/WidgetPinButton';
 import { ConfirmModal } from '@/components/common/ConfirmModal';
 import { getAppVersionLabel } from '@/lib/utils/app-version';
+import { isBlindAction } from '@/lib/config/blind-actions';
 import { COLOR, FONT, RADIUS, SPACE, TOUCH } from '@/lib/theme';
 
 export interface QuickAction {
@@ -50,9 +51,12 @@ export function RoleHome({
   // 실수 탭 방지로 한 단계 확인을 거친다. 네이티브 alert 대신 기존 ConfirmModal 재사용.
   const [confirmingLogout, setConfirmingLogout] = useState(false);
 
+  // 블라인드 카드(lib/config/blind-actions.ts, 2026-10-07 '내 행적')는 아예 후보에서 뺀다 —
+  // 없는 기능이 아니라 숨긴 기능이라 아래 "그 외 업무" 안내 개수에도 세지 않는다.
+  const candidates = actions.filter((a) => !isBlindAction(a.key));
   // href 없는 항목은 표시하지 않는다 — 눌러도 아무 일 없는 버튼은
   // 현장에서 "고장난 앱"으로 읽힌다(가짜 성공 금지 원칙과 같은 이유).
-  const available = actions.filter((a) => !!a.href);
+  const available = candidates.filter((a) => !!a.href);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -132,7 +136,7 @@ export function RoleHome({
           ))}
         </View>
 
-        {available.length < actions.length ? (
+        {available.length < candidates.length ? (
           <Text style={styles.note}>
             그 외 업무는 아직 앱에 없습니다. 웹(관리자 화면)에서 이용하세요.
           </Text>
