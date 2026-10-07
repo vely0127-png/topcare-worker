@@ -50,9 +50,12 @@ import { useWidgetEntryMeasure } from '@/lib/widget/useWidgetEntryMeasure';
 
 import { useServiceSchedules, hhmmToMin, type ServiceSchedule } from '@/lib/hooks/useServiceSchedules';
 import {
-  useServiceProvisions, useCreateServiceProvision, useDeleteServiceProvision,
+  useDayProvisions, useCreateServiceProvision, useDeleteServiceProvision,
   useBulkCreateServiceProvisions, type ServiceProvision, type BulkCreateItem,
 } from '@/lib/hooks/useServiceProvisions';
+import { useBackfillWindow, type BackfillState } from '@/lib/hooks/useBackfillWindow';
+import { stripBackfillNotePrefix, backfillReasonOfNote } from '@/lib/care/backfill-note';
+import { ReasonPromptModal } from '@/components/common/ReasonPromptModal';
 import { useResidents } from '@/lib/hooks/useResidents';
 import { useApiQuery } from '@/lib/hooks/useApi';
 import { useSession } from '@/lib/hooks/useAuth';
@@ -104,7 +107,8 @@ const BOWEL_OPTIONS: BowelOption[] = [
 ];
 
 /** 예외로 기록된 건인가 — note가 예외 문구와 일치하면 예외(완료와 시각적으로 구분) */
-const isExceptionRecord = (p: ServiceProvision | null) => isExceptionNote(p?.note);
+// 소급 저장분(B-9)은 note 앞에 `[소급: 사유]`가 붙는다 — 예외 문구 비교 전에 접두를 걷는다
+const isExceptionRecord = (p: ServiceProvision | null) => isExceptionNote(stripBackfillNotePrefix(p?.note));
 
 /**
  * 일괄 완료(H-8④) 대상 판정 — 투약·개인 계획(source assessment) 행은 제외한다.
@@ -148,13 +152,47 @@ export default function WorkboardScreen() {
   const today = getKSTToday();
   const { mutate: deleteProvision } = useDeleteServiceProvision();
   const [undoingIds, setUndoingIds] = useState<Set<string>>(new Set());
-  const todayDow = new Date(`${today}T12:00:00+09:00`).getDay();
 
   // 위젯 딥링크 진입 (W2 통합) — 서비스 행 탭(records/[residentId] 경유, scheduleId·
   // residentId 전달) 또는 [지금 할 일] 헤더 탭(workboard?block=now&entry=widget 직결,
   // TopCareWidgetProvider.kt 딥링크 규약)으로 들어온 경우 해당 행/블록으로 스크롤·강조한다.
-  const { residentId: widgetResidentId, scheduleId: widgetScheduleId, block: widgetBlock, entry: widgetEntry } =
-    useLocalSearchParams<{ residentId?: string; scheduleId?: string; block?: string; entry?: string }>();
+  // date: 홈 "어제 미완료 N건" 안내에서 어제 작업판으로 들어올 때(B-9, 26차-a R8) — 서버 소급 창에 있는 날짜만 받아들인다.
+  const { residentId: widgetResidentId, scheduleId: widgetScheduleId, block: widgetBlock, entry: widgetEntry, date: dateParam } =
+    useLocalSearchParams<{ residentId?: string; scheduleId?: string; block?: string; entry?: string; date?: string }>();
+
+  // ── B-9(2026-10-08, 26차-a R8) 날짜 선택 D-1~D-10 ──
+  // 상한·날짜별 상태·사유 필요 여부는 GET /api/care/backfill-window 1개에서만 받는다(앱 하드코딩 0).
+  // 판정은 서버 state 그대로 — 'free'(D-1 사유 없이) / 'reason'(D-2~ 사유 1회) / 'locked'(D-11·월마감 — 체크 불가).
+  const backfillQ = useBackfillWindow();
+  const [date, setDate] = useState(today);
+  const isToday = date === today;
+  const dayInfo = backfillQ.data?.days.find((d) => d.date === date);
+  // 창 정보를 못 받았으면(오류·로딩 전) 오늘이 아닌 날짜는 잠금으로 본다 — 모르는 날짜를 열어 두지 않는다
+  const dayState: BackfillState = isToday ? 'today' : dayInfo?.state ?? 'locked';
+  const daysAgoOfDate = dayInfo?.daysAgo ?? 0;
+  const dayLocked = dayState === 'locked';
+  const todayDow = new Date(`${date}T12:00:00+09:00`).getDay(); // 선택일의 요일(오늘이면 오늘) — 시간표 행의 요일 기준
+  // 홈 안내로 들어온 date 파라미터 1회 소비(서버 창에 있고 잠기지 않은 날짜만)
+  const dateParamConsumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const want = Array.isArray(dateParam) ? dateParam[0] : dateParam;
+    if (!want || dateParamConsumedRef.current === want || !backfillQ.data) return;
+    dateParamConsumedRef.current = want;
+    const hit = backfillQ.data.days.find((d) => d.date === want);
+    if (hit && hit.state !== 'locked') setDate(want);
+  }, [dateParam, backfillQ.data]);
+
+  // 사유 입력 모달(앱 자체 모달 — 네이티브 prompt 금지) — D-2 이상 체크·일괄 완료 전에 1회
+  const [reasonAsk, setReasonAsk] = useState<{ title: string; message: string; onSubmit: (reason: string) => void } | null>(null);
+  /** state가 'reason'(D-2 이상)이면 사유를 먼저 받고 action(reason)을 실행, 그 외 날짜는 바로 action(undefined) */
+  const withReason = (message: string, action: (reason?: string) => void) => {
+    if (dayState !== 'reason') { action(undefined); return; }
+    setReasonAsk({
+      title: `소급 사유 — ${date} (${daysAgoOfDate}일 전)`,
+      message,
+      onSubmit: (reason) => { setReasonAsk(null); action(reason); },
+    });
+  };
   useWidgetEntryMeasure('workboard', widgetEntry);
   const scrollRef = useRef<ScrollView>(null);
   const highlightRowRef = useRef<View>(null);
@@ -181,9 +219,13 @@ export default function WorkboardScreen() {
   const isWidgetBlockNow = widgetBlock === 'now' || (Array.isArray(widgetBlock) && widgetBlock.includes('now'));
   const isWidgetEntry = widgetEntry === 'widget' || (Array.isArray(widgetEntry) && widgetEntry.includes('widget'));
   const [showAllBlocks, setShowAllBlocks] = useState(() => !(isWidgetBlockNow || isWidgetEntry));
+  // B-9: 지난 날짜는 '지금' 시간대가 없어 focus 모드(현재 블록부터)를 쓸 수 없다 — 항상 전체 보기
+  const showAll = showAllBlocks || !isToday;
 
   const schedulesQ = useServiceSchedules({ isActive: true });
-  const provisionsQ = useServiceProvisions({ date: today, limit: 2000 }); // B-7(2026-10-07): 하루 571건인 시설에서 300·서버 캡 100에 잘려 '이미 된 것'이 미완료로 보였다 — 서버 date 조회 상한 2000과 맞춤
+  // B-7-b(26차-a R8): 매칭 입력은 하루 경량 키(day-keys — 상한 0·include 0)만 읽는다. 하루 571건인 시설에서 목록 API 상한(300→2000 임시 조치)에
+  // 기대지 않는다 — 웹 /todos·오늘 띠·보호자 API와 같은 입력. 선택한 날짜(date)의 기록을 읽는다(B-9).
+  const provisionsQ = useDayProvisions(date);
   // 시설 일과표 × 입소자 — 웹 [서비스 시간표]와 같은 목록을 보기 위한 원천 (2026-08-31)
   const residentsQ = useResidents({ status: 'admitted', limit: 200 });
   const facilityQ = useApiQuery<{ scheduleConfig?: { dailyRoutine?: { time: string; activity: string }[] } | null }>(
@@ -279,10 +321,11 @@ export default function WorkboardScreen() {
   // "지금" 블록 = 시작 시각이 지났고 다음 블록은 아직인 것 (없으면 첫 미래 블록)
   const nowMin = (() => { const d = new Date(Date.now() + 9 * 3600_000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
   const currentIdx = useMemo(() => {
+    if (!isToday) return -1; // B-9: 지난 날짜는 '지금' 시간대가 없다 — 모든 블록이 지남(이월 구획·'지금' 칩 없음)
     let idx = -1;
     blocks.forEach((b, i) => { if (hhmmToMin(b.start) <= nowMin + 30) idx = i; });
     return idx >= 0 ? idx : 0;
-  }, [blocks, nowMin]);
+  }, [blocks, nowMin, isToday]);
 
   // 위젯 딥링크 매칭 — scheduleId(정확한 행) > residentId(그 입소자의 첫 행) >
   // block==='now'(현재 블록 컨테이너만, 특정 행 없음) 순으로 찾는다.
@@ -322,8 +365,17 @@ export default function WorkboardScreen() {
     const d = new Date(Date.now() + 9 * 3600_000);
     return `${today}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:00+09:00`;
   };
-  /** 계획 시각(HH:MM) → 오늘 KST ISO. 가상행 매칭 키다 — 없으면 현재 시각으로 떨어진다. */
-  const plannedIso = (hhmm: string | null) => (hhmm ? `${today}T${hhmm}:00+09:00` : nowIso());
+  /**
+   * 계획 시각(HH:MM) → 선택일 KST ISO. 가상행 매칭 키다 — 시각이 없으면 오늘은 현재 시각, 지난 날짜는 그날 정오
+   * (지난 날짜 기록의 startAt이 오늘 날짜로 남지 않게 — 기록은 선택한 그날의 기록이다, B-9).
+   */
+  const plannedIso = (hhmm: string | null) => (hhmm ? `${date}T${hhmm}:00+09:00` : isToday ? nowIso() : `${date}T12:00:00+09:00`);
+  /**
+   * 기록 startAt 규약 1곳 — 오늘 실계획은 '기록한 실제 시각'(기존 동작), 가상행은 계획 시각.
+   * 지난 날짜(소급)는 실제 시각이 의미 없으니(오늘 시각이 그날 기록에 붙는다) 실·가상 모두 계획 시각을 쓴다.
+   */
+  const startAtFor = (schedule: ServiceSchedule, virtual: boolean) =>
+    (virtual || !isToday ? plannedIso(schedule.plannedStart) : nowIso());
 
   const record = (
     row: Row,
@@ -336,6 +388,22 @@ export default function WorkboardScreen() {
       RNAlert.alert('이미 기록됨', `${row.done.staffName ?? '다른 직원'}님이 이미 기록했습니다.`);
       return;
     }
+    if (dayLocked) return; // 잠금일(D-11·월마감) — 버튼도 비활성이지만 방어(서버도 422로 막는다)
+    // B-9: D-2 이상은 사유를 먼저 받는다(취소하면 저장하지 않음). 그 외 날짜는 바로 저장.
+    withReason(
+      `${row.schedule.residentName ?? ''} — ${serviceTypeLabel(row.schedule.serviceType)}(${row.schedule.plannedStart ?? '시각 미정'})을(를) 지난 날짜에 기록합니다. 소급 사유를 적어 주세요.`,
+      (reason) => recordNow(row, note, detail, onDone, selection, reason),
+    );
+  };
+
+  const recordNow = (
+    row: Row,
+    note: string | undefined,
+    detail: Record<string, string> | undefined,
+    onDone: (() => void) | undefined,
+    selection: Record<string, string[]> | undefined,
+    reason: string | undefined,
+  ) => {
     setSavingIds((prev) => new Set(prev).add(row.schedule.id));
     // 가상행(시설 일과표 파생)은 서버에 계획 id 가 없다 — scheduleId 대신 일과 내용을 note 로 보낸다.
     // 없는 id 를 보내면 서버가 404/무결성 오류를 내거나, 더 나쁘게는 남의 계획에 붙는다.
@@ -344,16 +412,19 @@ export default function WorkboardScreen() {
       {
         residentId: row.schedule.residentId,
         serviceType: row.schedule.serviceType,
-        serviceDate: today,
-        // ⚠ 실계획은 scheduleId 로 되찾으므로 '기록한 실제 시각'을 남긴다(기존 동작).
+        serviceDate: date,
+        // ⚠ 실계획은 scheduleId 로 되찾으므로 '기록한 실제 시각'을 남긴다(기존 동작 — 오늘 기록).
         //   가상행은 되찾을 id 가 없어 (note + 계획 시각)으로 매칭한다 — 그래서 계획 시각을 넣는다.
         //   웹 ServiceTodoList 도 같은 규약이다(H8: 슬롯 판정은 계획 시각 기준).
         //   여기에 실제 시각을 넣으면 체크해도 완료로 안 보인다 — 실제로 밟을 뻔한 함정.
-        startAt: virtual ? plannedIso(row.schedule.plannedStart) : nowIso(),
+        //   지난 날짜(소급)는 startAtFor가 계획 시각을 쓴다(오늘 시각이 그날 기록에 붙지 않게).
+        startAt: startAtFor(row.schedule, virtual),
         ...(virtual ? {} : { scheduleId: row.schedule.id }),
         staffId,
         source: 'manual',
         note: note ?? (virtual ? row.schedule.note : null),
+        // B-9 소급 사유(D-2 이상) — 서버가 note 앞 `[소급: 사유]`·감사로그 reason으로 저장
+        ...(reason ? { reason } : {}),
         // 관찰 세부 — 서버가 만드는 CareRecord 에 담긴다(기록 1건 원칙 유지)
         ...(detail ? { detail } : {}),
         // 서비스 상세 시트(#23) 선택값 — 서버가 detail 을 조립하는 원천(레거시 detail 과 함께 보냄)
@@ -466,7 +537,7 @@ export default function WorkboardScreen() {
    * createProvisionAsync가 태운다)로 항목별 폴백한다. blockStart가 있으면 실패 행을
    * bulkFailed로 되돌려 화면에 표시한다(신규 Alert 요약 없음).
    */
-  const recordSequentially = async (rows: Row[], blockStart?: string) => {
+  const recordSequentially = async (rows: Row[], blockStart?: string, reason?: string) => {
     const failedIds = new Set<string>();
     for (const r of rows) {
       setSavingIds((prev) => new Set(prev).add(r.schedule.id));
@@ -475,12 +546,13 @@ export default function WorkboardScreen() {
         await createProvisionAsync({
           residentId: r.schedule.residentId,
           serviceType: r.schedule.serviceType,
-          serviceDate: today,
-          startAt: virtual ? plannedIso(r.schedule.plannedStart) : nowIso(), // record()와 동일 규약
+          serviceDate: date,
+          startAt: startAtFor(r.schedule, virtual), // record()와 동일 규약
           ...(virtual ? {} : { scheduleId: r.schedule.id }),
           staffId,
           source: 'manual',
           note: virtual ? r.schedule.note : null,
+          ...(reason ? { reason } : {}), // B-9 소급 사유(일괄은 1회 입력한 사유 전부에)
         });
         // 실증 측정 — 일괄 완료도 체크 성공은 체크 성공이다(같은 체크 동작의 다른 진입 경로).
         measure.save('workboard:check', { recordStatus: '작성완료' });
@@ -511,7 +583,7 @@ export default function WorkboardScreen() {
   };
 
   /** 카운트다운 만료 — 실전송(API-1 bulk 1회, 계약: 2.4.4 착수 계약 §API-1). */
-  const commitBulk = async (block: Block, eligible: Row[]) => {
+  const commitBulk = async (block: Block, eligible: Row[], reason?: string) => {
     const active = bulkTimerRef.current;
     if (active?.blockStart === block.start) clearInterval(active.intervalId);
     bulkTimerRef.current = null;
@@ -522,15 +594,16 @@ export default function WorkboardScreen() {
         return {
           residentId: r.schedule.residentId,
           serviceType: r.schedule.serviceType,
-          serviceDate: today,
-          startAt: virtual ? plannedIso(r.schedule.plannedStart) : nowIso(),
+          serviceDate: date,
+          startAt: startAtFor(r.schedule, virtual),
           ...(virtual ? {} : { scheduleId: r.schedule.id }),
           staffId: staffId ?? '',
           source: 'manual' as const,
           ...(virtual && r.schedule.note ? { note: r.schedule.note } : {}),
         };
       });
-      const res = await bulkCreateAsync({ items });
+      // B-9: 소급 사유는 요청 단위 1개(일괄 완료는 사유 1회로 전부에 적용 — 서버가 항목별 reason이 없으면 이 값을 쓴다)
+      const res = await bulkCreateAsync({ items, ...(reason ? { reason } : {}) });
       const failedIdx = new Map(res.failed.map((f) => [f.index, f]));
       const failedIds = new Set<string>();
       eligible.forEach((r, i) => { if (failedIdx.has(i)) failedIds.add(r.schedule.id); });
@@ -547,7 +620,7 @@ export default function WorkboardScreen() {
       void provisionsQ.refetch();
     } catch {
       // bulk 요청 자체가 실패(오프라인·5xx) — 기존 단건 큐 경로로 항목별 폴백(설계 H-8⑤).
-      await recordSequentially(eligible, block.start);
+      await recordSequentially(eligible, block.start, reason);
     } finally {
       setBulkFlow((prev) => { const next = { ...prev }; delete next[block.start]; return next; });
     }
@@ -555,6 +628,16 @@ export default function WorkboardScreen() {
 
   /** 블록 헤더 [남은 N건 모두 완료] 탭 — H-8①②③, 확인창 없이 즉시 낙관 체크 + 5초 되돌리기. */
   const startBulkComplete = (block: Block) => {
+    if (dayLocked) return; // 잠금일 — 버튼도 렌더하지 않지만 방어
+    const eligibleNow = block.rows.filter((r) => !r.done).filter(isBulkEligible);
+    if (eligibleNow.length === 0) return;
+    // B-9: D-2 이상은 사유를 1번만 받고(모달) 그 사유로 카운트다운·전송을 진행한다. 취소하면 아무것도 체크하지 않는다.
+    withReason(
+      `${block.start} 시간대의 남은 ${eligibleNow.length}건을 ${date} 소급 기록으로 모두 완료합니다. 사유를 한 번 적으면 전부에 적용됩니다.`,
+      (reason) => startBulkCompleteNow(block, reason),
+    );
+  };
+  const startBulkCompleteNow = (block: Block, reason?: string) => {
     const remaining = block.rows.filter((r) => !r.done);
     const eligible = remaining.filter(isBulkEligible);
     if (eligible.length === 0) return;
@@ -571,12 +654,20 @@ export default function WorkboardScreen() {
         return { ...prev, [block.start]: { ...cur, secondsLeft: cur.secondsLeft - 1 } };
       });
     }, 1000);
-    const timeoutId = setTimeout(() => { void commitBulk(block, eligible); }, 5000);
+    const timeoutId = setTimeout(() => { void commitBulk(block, eligible, reason); }, 5000);
     bulkTimerRef.current = { blockStart: block.start, timeoutId, intervalId };
   };
 
   // 화면을 나가면 타이머를 남기지 않는다(언마운트 후 setState 경고·유령 전송 방지).
   useEffect(() => () => clearBulkTimer(), []);
+  // B-9: 날짜를 바꾸면 진행 중이던 일괄 카운트다운·낙관 체크를 버린다(다른 날짜의 기록으로 전송되지 않게 — 전송 전이라 아무 것도 저장되지 않았다)
+  useEffect(() => {
+    clearBulkTimer();
+    setBulkFlow({}); setBulkChecked({}); setBulkFailed({});
+    setQueuedKeys(new Set());
+    setReasonAsk(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
 
   const isLoading = schedulesQ.isLoading || provisionsQ.isLoading || residentsQ.isLoading || facilityQ.isLoading;
   // 일과표·입소자 조회가 실패하면 판이 조용히 비어 보인다 — 빈 판으로 위장하지 않는다(정직성 원칙)
@@ -743,7 +834,7 @@ export default function WorkboardScreen() {
               : null,
             isHighlighted && st.rowHighlight,
           ]}
-          disabled={saving || undoing || isQueued || isBulkChecked}
+          disabled={saving || undoing || isQueued || isBulkChecked || (dayLocked && !done)}
           onPress={() => (done
             ? RNAlert.alert(
                 isException ? '예외로 기록됨' : '이미 기록됨',
@@ -767,7 +858,13 @@ export default function WorkboardScreen() {
               {opts?.showOriginalTime && row.schedule.plannedStart ? ` · 원래 ${row.schedule.plannedStart}` : ''}
             </Text>
             {/* ③ 예외는 완료와 구분해 보여준다 — 거부·일부인데 초록 완료로 보이면 안 된다 */}
-            {isException && <Text style={st.exceptionTag}>예외 — {done?.note}</Text>}
+            {isException && <Text style={st.exceptionTag}>예외 — {stripBackfillNotePrefix(done?.note)}</Text>}
+            {/* B-9 소급 칩 — 서버가 day-keys로 내려 준 backfilled(작성 시각 KST 날짜 ≠ 제공일)만 그린다. 앱이 날짜를 판정하지 않는다 */}
+            {done?.backfilled && (
+              <Text style={st.backfillTag}>
+                소급 기록{backfillReasonOfNote(done.note) ? ` — ${backfillReasonOfNote(done.note)}` : ''}
+              </Text>
+            )}
             {/* ⑤ 대기 중은 체크가 아니다 — 회색 라벨로만 알린다 */}
             {isQueued && <Text style={st.queuedTag}>대기 중 — 전파가 돌아오면 자동 전송됩니다</Text>}
             {isBulkFailed && <Text style={st.bulkFailedTag}>일괄 저장 실패 — 다시 눌러 개별 기록하세요</Text>}
@@ -786,7 +883,7 @@ export default function WorkboardScreen() {
               setDetailFor(row);
             }}
           />
-        ) : done && (!staffId || !done.staffId || done.staffId === staffId) ? (
+        ) : done && !dayLocked && (!staffId || !done.staffId || done.staffId === staffId) ? (
           // ① 되돌리기 — 내가 기록한 건만 (남의 기록은 서버 이전에 화면에서 막는다)
           <RowActionButton variant="neutral" label="되돌리기" disabled={undoing} onPress={() => undo(row)} />
         ) : (
@@ -810,6 +907,47 @@ export default function WorkboardScreen() {
         contentContainerStyle={st.scroll}
         refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onPullRefresh} />}
       >
+        {/* B-9 날짜 선택 — 오늘·어제·…·D-10(+D-11 잠금 예시). 상한·상태는 서버(GET /api/care/backfill-window)가 준 값 그대로 그린다.
+            창 정보를 못 받으면 선택줄 대신 오류 1줄 + 오늘만(하드코딩 폴백 없음). */}
+        {backfillQ.data ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.dateRow} accessibilityRole="tablist">
+            {backfillQ.data.days.map((d) => {
+              const sel = d.date === date;
+              const isLockedDay = d.state === 'locked';
+              return (
+                <TouchableOpacity
+                  key={d.date}
+                  style={[st.dateChip, sel && st.dateChipSel, isLockedDay && !sel && st.dateChipLocked]}
+                  onPress={() => setDate(d.date)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: sel }}
+                  accessibilityLabel={`${d.daysAgo === 0 ? '오늘' : d.daysAgo === 1 ? '어제' : `${d.daysAgo}일 전`} ${d.date}${isLockedDay ? ' 잠김' : ''}`}
+                >
+                  <Text style={[st.dateChipLabel, sel && st.dateChipLabelSel, isLockedDay && !sel && st.dateChipLabelLocked]}>
+                    {d.daysAgo === 0 ? '오늘' : d.daysAgo === 1 ? '어제' : `${d.daysAgo}일 전`}
+                  </Text>
+                  <Text style={[st.dateChipSub, sel && st.dateChipLabelSel, isLockedDay && !sel && st.dateChipLabelLocked]}>
+                    {isLockedDay ? '잠김 ' : ''}{d.date.slice(5).replace('-', '/')}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : backfillQ.isError ? (
+          <Text style={st.dateErrorText}>지난 날짜 선택을 불러오지 못했습니다 — 오늘만 기록할 수 있습니다</Text>
+        ) : null}
+        {!isToday && (
+          <View style={[st.dateNotice, dayLocked && st.dateNoticeLocked]}>
+            <Text style={st.dateNoticeText}>
+              {dayLocked
+                ? `${date}은 소급 기록을 할 수 없는 날짜입니다 — 오늘 기준 ${backfillQ.data?.maxDays ?? ''}일을 넘었거나 월마감된 날짜입니다. 기록이 꼭 필요하면 관리자에게 알려 웹 서비스 기록 탭에서 수기로 남기세요.`
+                : dayState === 'reason'
+                  ? `${date}(${daysAgoOfDate}일 전) 소급 기록입니다 — 체크하면 소급 사유를 한 번 묻습니다. 저장된 기록에는 '소급' 표시와 사유가 남습니다.`
+                  : `${date}(어제) 소급 기록입니다 — 사유 없이 체크할 수 있고, 저장된 기록에는 '소급' 표시가 남습니다.`}
+            </Text>
+          </View>
+        )}
+
         {isError && (
           <View style={st.errorBanner}>
             <Text style={st.errorText}>작업판을 불러오지 못했습니다 — 아래 내용은 실제가 아닐 수 있습니다.</Text>
@@ -826,13 +964,13 @@ export default function WorkboardScreen() {
         {!isLoading && !isError && blocks.length === 0 && (
           <View style={st.center}>
             <MaterialCommunityIcons name="clipboard-text-outline" size={48} color={COLOR.textFaint} />
-            <Text style={st.emptyText}>오늘 계획된 서비스가 없습니다</Text>
+            <Text style={st.emptyText}>{isToday ? '오늘' : date} 계획된 서비스가 없습니다</Text>
             <Text style={st.emptyHint}>웹 관리자에서 [기본 설정 시간표]에 일과를 저장하거나, 기초평가 {'>'} 서비스 적용·목욕 배정을 하면 여기에 나타납니다</Text>
           </View>
         )}
 
         {/* H-6 표현 개선 — 위젯 진입(block=now/entry=widget)일 때만: "지금" 요약 + 전체 보기 링크 */}
-        {!isLoading && !isError && blocks.length > 0 && !showAllBlocks && (
+        {!isLoading && !isError && blocks.length > 0 && !showAll && (
           <View style={st.nowSummary}>
             <Text style={st.nowSummaryText}>
               지금 {nowHH}:{nowMM} 기준 · <Text style={st.nowSummaryLink} onPress={() => setShowAllBlocks(true)}>전체 보기</Text>
@@ -904,9 +1042,9 @@ export default function WorkboardScreen() {
           헤더"가 항상 첫 화면 안에 오도록(요구사항 ⑤). 전체 보기(showAllBlocks=true)는 기존대로
           모든 블록(과거 포함)을 처음부터 보여준다.
         */}
-        {(showAllBlocks ? blocks : blocks.slice(currentIdx)).map((block) => {
-          const isCurrent = block.start === blocks[currentIdx]?.start;
-          const isExpanded = showAllBlocks || isCurrent || block.start === forcedExpandedBlock;
+        {(showAll ? blocks : blocks.slice(currentIdx)).map((block) => {
+          const isCurrent = isToday && block.start === blocks[currentIdx]?.start;
+          const isExpanded = showAll || isCurrent || block.start === forcedExpandedBlock;
           const doneCount = block.rows.filter((r) => r.done && !isExceptionRecord(r.done)).length;
           const exceptionCount = block.rows.filter((r) => isExceptionRecord(r.done)).length;
           const remainingRows = block.rows.filter((r) => !r.done);
@@ -932,7 +1070,7 @@ export default function WorkboardScreen() {
               {/* H-8① — [남은 N건 모두 완료]를 블록 헤더로 이동(93행 스크롤 없이 바로 보임).
                   PD 실측 후속 — "제외 n건" 라벨은 대상 0건(투약·개인계획만 남은 블록)이어도
                   버튼과 별개로 항상 보인다(이전엔 버튼과 함께 숨어 "제외됐는지 0건인지" 구분이 안 됐다). */}
-              {isExpanded && (flow || eligibleRows.length > 0 || showExcludedTag) && (
+              {isExpanded && !dayLocked && (flow || eligibleRows.length > 0 || showExcludedTag) && (
                 <View style={st.headerActionRow}>
                   {(flow || eligibleRows.length > 0) && (
                     <TouchableOpacity
@@ -1021,6 +1159,15 @@ export default function WorkboardScreen() {
         </View>
       </Modal>
 
+      {/* B-9 소급 사유 — D-2 이상 체크·일괄 완료 전에 1회(앱 자체 모달, 네이티브 prompt 금지). 취소하면 아무것도 저장하지 않는다 */}
+      <ReasonPromptModal
+        visible={!!reasonAsk}
+        title={reasonAsk?.title ?? ''}
+        message={reasonAsk?.message}
+        onSubmit={(reason) => reasonAsk?.onSubmit(reason)}
+        onCancel={() => setReasonAsk(null)}
+      />
+
       {/* H-8③ — 5초 되돌리기 토스트. 카운트다운 중(phase='countdown')에만 뜬다 —
           이 동안은 실제 전송이 없어 되돌리기 = 미전송 중단이 그대로 성립한다. */}
       {(() => {
@@ -1051,6 +1198,21 @@ const st = StyleSheet.create({
   errorText: { fontSize: FONT.label, color: COLOR.danger, fontWeight: '600' },
   retryBtn: { backgroundColor: COLOR.danger, borderRadius: RADIUS.sm, minHeight: TOUCH.min, alignItems: 'center', justifyContent: 'center' },
   retryText: { color: '#fff', fontSize: FONT.body, fontWeight: '700' },
+
+  // B-9 날짜 선택(오늘·어제·n일 전·잠금) / 소급 안내 / 소급 칩
+  dateRow: { gap: SPACE.sm, paddingBottom: SPACE.md },
+  dateChip: { minWidth: 64, minHeight: TOUCH.min, paddingHorizontal: SPACE.md, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.border, backgroundColor: COLOR.surface, alignItems: 'center', justifyContent: 'center' },
+  dateChipSel: { backgroundColor: COLOR.primary, borderColor: COLOR.primary },
+  dateChipLocked: { borderStyle: 'dashed', backgroundColor: COLOR.bg },
+  dateChipLabel: { fontSize: FONT.label, fontWeight: '700', color: COLOR.text },
+  dateChipSub: { fontSize: FONT.caption, color: COLOR.textMuted, marginTop: 1 },
+  dateChipLabelSel: { color: COLOR.onPrimary },
+  dateChipLabelLocked: { color: COLOR.textMuted },
+  dateErrorText: { fontSize: FONT.caption, color: COLOR.caution, fontWeight: '600', marginBottom: SPACE.md },
+  dateNotice: { backgroundColor: COLOR.surface, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLOR.border, padding: SPACE.md, marginBottom: SPACE.lg },
+  dateNoticeLocked: { backgroundColor: COLOR.warningBg, borderColor: COLOR.caution },
+  dateNoticeText: { fontSize: FONT.label, color: COLOR.text, lineHeight: 22 },
+  backfillTag: { fontSize: FONT.caption, color: COLOR.caution, fontWeight: '700', marginTop: 2 },
 
   block: { backgroundColor: COLOR.surface, borderRadius: RADIUS.lg, padding: SPACE.lg, marginBottom: SPACE.lg, borderWidth: 1, borderColor: COLOR.border },
   blockCurrent: { borderColor: COLOR.primary, borderWidth: 2 },
