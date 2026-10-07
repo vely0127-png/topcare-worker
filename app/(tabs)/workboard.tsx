@@ -183,7 +183,7 @@ export default function WorkboardScreen() {
   const [showAllBlocks, setShowAllBlocks] = useState(() => !(isWidgetBlockNow || isWidgetEntry));
 
   const schedulesQ = useServiceSchedules({ isActive: true });
-  const provisionsQ = useServiceProvisions({ date: today, limit: 300 });
+  const provisionsQ = useServiceProvisions({ date: today, limit: 2000 }); // B-7(2026-10-07): 하루 571건인 시설에서 300·서버 캡 100에 잘려 '이미 된 것'이 미완료로 보였다 — 서버 date 조회 상한 2000과 맞춤
   // 시설 일과표 × 입소자 — 웹 [서비스 시간표]와 같은 목록을 보기 위한 원천 (2026-08-31)
   const residentsQ = useResidents({ status: 'admitted', limit: 200 });
   const facilityQ = useApiQuery<{ scheduleConfig?: { dailyRoutine?: { time: string; activity: string }[] } | null }>(
