@@ -21,6 +21,7 @@
 import type { ServiceSchedule } from '../hooks/useServiceSchedules';
 import type { ServiceProvision } from '../hooks/useServiceProvisions';
 import { PERSONAL_TYPES, inferTypeFromActivity } from './service-rules';
+import { stripBackfillNotePrefix } from './backfill-note';
 
 export interface RoutineItem { time: string; activity: string }
 export interface ResidentLite { id: string; name: string }
@@ -108,7 +109,8 @@ export function findVirtualProvision(
   const mine = provisions.filter((p) => !p.scheduleId && p.residentId === schedule.residentId);
   const atPlanned = (p: ServiceProvision) =>
     schedule.plannedStart != null && kstHHMM(p.startAt ?? null) === schedule.plannedStart;
-  const noteMatches = (p: ServiceProvision) => p.note != null && p.note === schedule.note;
+  // 소급 저장분(B-9)은 note 앞에 `[소급: 사유]`가 붙는다 — 접두를 걷고 비교한다(같은 일과 행으로 읽히게)
+  const noteMatches = (p: ServiceProvision) => p.note != null && stripBackfillNotePrefix(p.note) === schedule.note;
 
   return (
     mine.find((p) => noteMatches(p) && atPlanned(p))

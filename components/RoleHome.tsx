@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useSession, useRole } from '@/lib/hooks';
+import { useBackfillWindow } from '@/lib/hooks/useBackfillWindow';
 import { useAuthStore } from '@/lib/auth/auth-store';
 import { AttendanceCard } from '@/components/AttendanceCard';
 import { WidgetPromoCard } from '@/components/WidgetPromoCard';
@@ -58,6 +59,14 @@ export function RoleHome({
   // 현장에서 "고장난 앱"으로 읽힌다(가짜 성공 금지 원칙과 같은 이유).
   const available = candidates.filter((a) => !!a.href);
 
+  // B-9(2026-10-08, 26차-a R8) 어제 미완료 안내 — 작업판이 있는 역할 홈에만 1줄. 건수는 서버(GET /api/care/backfill-window
+  // yesterday.pending — 웹 /todos와 같은 시간표 조립·day-keys 매칭)가 내려 준 값 그대로다. 앱에서 세지 않는다.
+  // 0건·조회 실패·로딩 중이면 숨긴다(가짜 0·오류 위장 없음). 탭하면 어제 작업판으로 이동한다.
+  const hasWorkboard = available.some((a) => a.key === 'workboard');
+  const backfillQ = useBackfillWindow({ enabled: hasWorkboard });
+  const yesterday = hasWorkboard ? backfillQ.data?.yesterday : undefined;
+  const yesterdayLocked = yesterday ? backfillQ.data?.days.find((d) => d.date === yesterday.date)?.state === 'locked' : false;
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -96,6 +105,20 @@ export function RoleHome({
           홈이 모든 역할의 첫 화면이다. 사람이 누르는 것은 [퇴근] 하나뿐이다.
         */}
         <AttendanceCard />
+
+        {/* 어제 미완료 N건 — 0이면 아예 렌더하지 않는다. 어제가 월마감으로 잠겼으면 눌러도 체크할 수 없으므로 안내를 숨긴다 */}
+        {yesterday && yesterday.pending > 0 && !yesterdayLocked ? (
+          <TouchableOpacity
+            style={styles.yesterdayRow}
+            onPress={() => router.push(`/(tabs)/workboard?date=${yesterday.date}` as never)}
+            accessibilityRole="button"
+            accessibilityLabel={`어제 미완료 ${yesterday.pending}건 — 어제 작업판 열기`}
+          >
+            <MaterialCommunityIcons name="calendar-alert" size={26} color={COLOR.caution} />
+            <Text style={styles.yesterdayText}>어제 미완료 {yesterday.pending}건</Text>
+            <Text style={styles.yesterdayLink}>어제 작업판 열기</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <Text style={styles.sectionTitle}>{title}</Text>
 
@@ -169,6 +192,13 @@ const styles = StyleSheet.create({
   },
   logoutText: { color: COLOR.textSub, fontWeight: '600', fontSize: FONT.label },
   sectionTitle: { fontSize: FONT.heading, fontWeight: '700', color: COLOR.text },
+  yesterdayRow: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.md, minHeight: TOUCH.min,
+    borderRadius: RADIUS.md, backgroundColor: COLOR.warningBg, borderWidth: 1, borderColor: COLOR.caution,
+    paddingHorizontal: SPACE.lg, paddingVertical: SPACE.sm,
+  },
+  yesterdayText: { flex: 1, fontSize: FONT.body, fontWeight: '700', color: COLOR.text },
+  yesterdayLink: { fontSize: FONT.label, fontWeight: '700', color: COLOR.caution, textDecorationLine: 'underline' },
   list: { gap: SPACE.md },
   button: {
     flexDirection: 'row',

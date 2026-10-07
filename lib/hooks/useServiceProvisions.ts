@@ -8,7 +8,7 @@
  *
  * ★ 자동 확정 없음. confirm/reject 은 반드시 사람이 수행.
  */
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
 import { postWithQueue } from '../queue/offline-queue';
@@ -38,6 +38,11 @@ export interface ServiceProvision {
   reviewNote: string | null;
   note: string | null;
   createdAt: string | null;
+  /**
+   * 소급 기록 여부(B-9) — 서버가 day-keys 응답에 실어 준다(작성 시각 KST 날짜 ≠ 제공일).
+   * 앱은 이 값으로 '소급' 칩만 그린다 — KST 판정을 복제하지 않는다. 다른 경로(목록·POST 응답)에서는 없음(false로 취급).
+   */
+  backfilled?: boolean;
   /** POST 응답에만 실림 — 개인계획 없음(C5)·활성처방 없음(H4) 등 서버 경고. 반드시 사용자에게 노출. */
   warning?: string;
 }
@@ -75,6 +80,65 @@ export function useServiceProvisions(params?: ServiceProvisionListParams) {
   );
 }
 
+// ── 하루 기록 경량 키(day-keys) — 작업판 매칭의 유일한 입력 (기본서비스 설계 B-7-b, 26차-a R8) ──
+// 왜: 목록 API(상한 100/2000)로 그날 기록을 받으면 하루 기록이 상한을 넘는 날 앞 시간대가 전부 '미완료'로 보였다
+// (2026-10-07 박달재 571건). day-keys는 그날 전건을 상한 없이 매칭에 필요한 열만 준다 — 웹 /todos·오늘 띠와 같은 입력.
+// 응답: { date, items: [{ id, scheduleId, residentId, serviceType, note, startAt, status, createdAt, staffId, backfilled }], total, staffNames }
+interface DayKeyItem {
+  id: string;
+  scheduleId: string | null;
+  residentId: string;
+  serviceType: string;
+  note: string | null;
+  startAt: string | null;
+  status: string;
+  createdAt: string | null;
+  staffId: string | null;
+  backfilled: boolean;
+}
+interface DayKeysResponse { date: string; items: DayKeyItem[]; total: number; staffNames?: Record<string, string> }
+
+/** day-keys 한 행 → 작업판이 쓰는 ServiceProvision 모양(키에 없는 필드는 중립값 — 화면이 읽지 않는 열) */
+function dayKeyToProvision(k: DayKeyItem, staffNames: Record<string, string>): ServiceProvision {
+  return {
+    id: k.id,
+    residentId: k.residentId,
+    residentName: null,
+    staffId: k.staffId,
+    staffName: k.staffId ? staffNames[k.staffId] ?? null : null,
+    scheduleId: k.scheduleId,
+    serviceType: k.serviceType,
+    serviceDate: '',
+    startAt: k.startAt,
+    endAt: null,
+    durationMin: null,
+    count: 1,
+    source: 'manual',
+    status: k.status as ProvisionStatus,
+    confirmedBy: null,
+    confirmedAt: null,
+    reviewNote: null,
+    note: k.note,
+    createdAt: k.createdAt,
+    backfilled: k.backfilled,
+  };
+}
+
+export function useDayProvisions(date: string) {
+  const userId = useAuthStore((s) => s.session?.user.id ?? null);
+  return useQuery<{ items: ServiceProvision[]; total: number }, ApiError>({
+    // 키 앞머리 'service-provisions' — 생성·삭제 mutation의 invalidateQueries가 그대로 이 쿼리도 갱신한다
+    queryKey: ['service-provisions', 'day-keys', userId, date],
+    queryFn: async () => {
+      const data = await api.get<DayKeysResponse>(`/api/care/service-provisions/day-keys?date=${date}`);
+      const names = data.staffNames ?? {};
+      const items = (Array.isArray(data.items) ? data.items : []).map((k) => dayKeyToProvision(k, names));
+      return { items, total: typeof data.total === 'number' ? data.total : items.length };
+    },
+    refetchInterval: 20_000, // 공동 판 동기화(다른 직원 체크 반영)
+  });
+}
+
 // ── 생성 mutation ──────────────────────────────────────────────
 export interface CreateServiceProvisionVars {
   residentId: string;
@@ -99,6 +163,11 @@ export interface CreateServiceProvisionVars {
    * 서버가 detail 을 조립하는 데 쓴다(레거시 detail 키와 함께 보낼 수 있다).
    */
   selection?: Record<string, string[]>;
+  /**
+   * 지난 날짜 소급 사유(B-9) — D-2 이상은 필수(없으면 서버 422 BACKFILL_REASON_REQUIRED).
+   * 서버가 note 앞에 `[소급: 사유]`로 저장하고 감사로그 reason에 남긴다. 오늘·어제(D-1) 기록에는 보내지 않는다.
+   */
+  reason?: string;
 }
 
 // ── H-8 일괄 완료(2026-09-23) — API-1 bulk 1회 ────────────────
@@ -114,6 +183,8 @@ export interface BulkCreateItem {
   staffId: string;
   source: 'manual';
   note?: string;
+  /** 항목별 소급 사유(보통 비워 두고 요청 단위 reason을 쓴다) */
+  reason?: string;
 }
 export interface BulkCreateResult {
   created: { index: number; id: string; scheduleId?: string }[];
@@ -123,7 +194,8 @@ export interface BulkCreateResult {
 
 export function useBulkCreateServiceProvisions() {
   const qc = useQueryClient();
-  return useMutation<BulkCreateResult, ApiError | Error, { items: BulkCreateItem[] }>({
+  // reason: 일괄 완료는 사유 1회로 전부에 적용(B-9) — 서버가 항목별 reason이 없을 때 이 값을 쓴다
+  return useMutation<BulkCreateResult, ApiError | Error, { items: BulkCreateItem[]; reason?: string }>({
     // 오프라인 큐 대상 아님(bulk는 QueueKind에 없다) — 실패는 호출부가 기존 단건 큐 경로로
     // 항목별 폴백한다(설계 H-8⑤ "오프라인이면 기존 큐 경로로 항목별 폴백").
     mutationFn: (vars) => api.post<BulkCreateResult>('/api/care/service-provisions/bulk', vars),
