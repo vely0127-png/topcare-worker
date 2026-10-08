@@ -13,6 +13,7 @@ import { useApiListQuery } from './useApi';
 import { api, ApiError } from '../api/client';
 import { postWithQueue } from '../queue/offline-queue';
 import { useAuthStore } from '../auth/auth-store';
+import type { NextDawnRule } from '../care/calendar-date';
 
 // ── 타입 ──────────────────────────────────────────────────────
 export type ProvisionStatus = 'draft' | 'confirmed' | 'rejected';
@@ -83,7 +84,9 @@ export function useServiceProvisions(params?: ServiceProvisionListParams) {
 // ── 하루 기록 경량 키(day-keys) — 작업판 매칭의 유일한 입력 (기본서비스 설계 B-7-b, 26차-a R8) ──
 // 왜: 목록 API(상한 100/2000)로 그날 기록을 받으면 하루 기록이 상한을 넘는 날 앞 시간대가 전부 '미완료'로 보였다
 // (2026-10-07 박달재 571건). day-keys는 그날 전건을 상한 없이 매칭에 필요한 열만 준다 — 웹 /todos·오늘 띠와 같은 입력.
-// 응답: { date, items: [{ id, scheduleId, residentId, serviceType, note, startAt, status, createdAt, staffId, backfilled }], total, staffNames }
+// 응답: { date, items: [{ id, scheduleId, residentId, serviceType, note, startAt, serviceDate, status, createdAt, staffId, backfilled }], total, staffNames, nextDawn }
+// withNextDawn=1(QA37 N01, 26차-a-h R3): 그날 전건 + 다음 날 00:00~04:59 기록을 함께 받고, 응답 nextDawn { date, boundary }로 '익일 새벽' 행의 실제 달력 날짜 규칙을 받는다
+// (앱은 날짜 산술·경계값 하드코딩 없이 lib/care/calendar-date.ts로 문자열 비교만 한다).
 interface DayKeyItem {
   id: string;
   scheduleId: string | null;
@@ -91,12 +94,14 @@ interface DayKeyItem {
   serviceType: string;
   note: string | null;
   startAt: string | null;
+  /** 제공일 'YYYY-MM-DD' — 행 매칭이 행의 실제 달력 날짜와 대조한다(구 서버 응답에는 없음) */
+  serviceDate?: string | null;
   status: string;
   createdAt: string | null;
   staffId: string | null;
   backfilled: boolean;
 }
-interface DayKeysResponse { date: string; items: DayKeyItem[]; total: number; staffNames?: Record<string, string> }
+interface DayKeysResponse { date: string; items: DayKeyItem[]; total: number; staffNames?: Record<string, string>; nextDawn?: NextDawnRule }
 
 /** day-keys 한 행 → 작업판이 쓰는 ServiceProvision 모양(키에 없는 필드는 중립값 — 화면이 읽지 않는 열) */
 function dayKeyToProvision(k: DayKeyItem, staffNames: Record<string, string>): ServiceProvision {
@@ -108,7 +113,7 @@ function dayKeyToProvision(k: DayKeyItem, staffNames: Record<string, string>): S
     staffName: k.staffId ? staffNames[k.staffId] ?? null : null,
     scheduleId: k.scheduleId,
     serviceType: k.serviceType,
-    serviceDate: '',
+    serviceDate: k.serviceDate ?? '',
     startAt: k.startAt,
     endAt: null,
     durationMin: null,
@@ -126,14 +131,14 @@ function dayKeyToProvision(k: DayKeyItem, staffNames: Record<string, string>): S
 
 export function useDayProvisions(date: string) {
   const userId = useAuthStore((s) => s.session?.user.id ?? null);
-  return useQuery<{ items: ServiceProvision[]; total: number }, ApiError>({
+  return useQuery<{ items: ServiceProvision[]; total: number; nextDawn: NextDawnRule | null }, ApiError>({
     // 키 앞머리 'service-provisions' — 생성·삭제 mutation의 invalidateQueries가 그대로 이 쿼리도 갱신한다
     queryKey: ['service-provisions', 'day-keys', userId, date],
     queryFn: async () => {
-      const data = await api.get<DayKeysResponse>(`/api/care/service-provisions/day-keys?date=${date}`);
+      const data = await api.get<DayKeysResponse>(`/api/care/service-provisions/day-keys?date=${date}&withNextDawn=1`);
       const names = data.staffNames ?? {};
       const items = (Array.isArray(data.items) ? data.items : []).map((k) => dayKeyToProvision(k, names));
-      return { items, total: typeof data.total === 'number' ? data.total : items.length };
+      return { items, total: typeof data.total === 'number' ? data.total : items.length, nextDawn: data.nextDawn ?? null };
     },
     refetchInterval: 20_000, // 공동 판 동기화(다른 직원 체크 반영)
   });

@@ -61,6 +61,7 @@ import { useApiQuery } from '@/lib/hooks/useApi';
 import { useSession } from '@/lib/hooks/useAuth';
 import { serviceTypeLabel } from '@/lib/care/service-rules';
 import { buildRoutineSchedules, findVirtualProvision, isVirtualSchedule } from '@/lib/care/routine-rows';
+import { calendarDateOfStart, isFutureCalendarDate, FUTURE_ROW_NOTICE } from '@/lib/care/calendar-date';
 import { kstHHMM } from '@/lib/hooks/useTodayTasks';
 import { getKSTToday, toKSTTime } from '@/lib/utils/date';
 import { QueuedOfflineError, type QueueItem } from '@/lib/queue/offline-queue';
@@ -116,7 +117,7 @@ const isExceptionRecord = (p: ServiceProvision | null) => isExceptionNote(stripB
  * 판단은 이 함수 1곳에서만 — 화면에서 따로 판정하지 않는다(반복 결함 차단 규약).
  */
 const isBulkEligible = (row: Row) =>
-  !row.done && row.schedule.serviceType !== 'medication' && row.schedule.source !== 'assessment';
+  !row.done && row.calendarDate != null && row.schedule.serviceType !== 'medication' && row.schedule.source !== 'assessment';
 
 /**
  * 큐 항목(QueueItem) → 작업판 행 키(row.schedule.id) 역산 (2026-09-06 PD 검토 후속 ③).
@@ -139,6 +140,11 @@ function queueItemRowKey(item: QueueItem): string | null {
 type Row = {
   schedule: ServiceSchedule;
   done: ServiceProvision | null; // 오늘 이 계획 행의 기록 (선착 1건)
+  /**
+   * 이 행의 실제 달력 날짜(KST) — 05시 이전 '익일 새벽' 행은 선택일 다음 날(QA37 N01, 26차-a-h R3).
+   * 서버가 day-keys로 내려 준 nextDawn 규칙을 문자열로 비교해서만 정한다(앱 날짜 계산 0). day-keys가 아직 안 왔으면 null — 기록 불가(날짜를 지어내지 않는다).
+   */
+  calendarDate: string | null;
 };
 type Block = { start: string; rows: Row[] };
 
@@ -182,13 +188,31 @@ export default function WorkboardScreen() {
     if (hit && hit.state !== 'locked') setDate(want);
   }, [dateParam, backfillQ.data]);
 
+  /**
+   * 행 단위 소급 상태 — 서버가 준 날짜 목록(backfillState 결과)에서 행의 달력 날짜로 찾는다(앱 판정 신설 0).
+   * 오늘 날짜 = 'today', 내일 이후(오늘 화면의 '익일 새벽' 행) = 'locked', 날짜를 모르면(day-keys 도착 전) 'locked'.
+   */
+  const rowDayState = (row: Row): BackfillState => {
+    const cal = row.calendarDate;
+    if (!cal) return 'locked';
+    if (cal === today) return 'today';
+    if (isFutureCalendarDate(cal, today)) return 'locked';
+    return backfillQ.data?.days.find((d) => d.date === cal)?.state ?? 'locked';
+  };
+  /** 체크·일괄 완료 대상에서 빠지는 행 — 선택일 잠금·행 날짜 잠금·내일 날짜(같은 함수 1개) */
+  const rowBlocked = (row: Row) => dayLocked || rowDayState(row) === 'locked';
+
   // 사유 입력 모달(앱 자체 모달 — 네이티브 prompt 금지) — D-2 이상 체크·일괄 완료 전에 1회
   const [reasonAsk, setReasonAsk] = useState<{ title: string; message: string; onSubmit: (reason: string) => void } | null>(null);
   /** state가 'reason'(D-2 이상)이면 사유를 먼저 받고 action(reason)을 실행, 그 외 날짜는 바로 action(undefined) */
-  const withReason = (message: string, action: (reason?: string) => void) => {
-    if (dayState !== 'reason') { action(undefined); return; }
+  // QA37 N01: 판단은 선택일이 아니라 행의 실제 달력 날짜(row.calendarDate) 기준 — 일괄은 대상 행 중 하나라도 사유가 필요하면 1회 묻는다.
+  const withReason = (message: string, rows: Row[], action: (reason?: string) => void) => {
+    const needing = rows.filter((r) => rowDayState(r) === 'reason');
+    if (needing.length === 0) { action(undefined); return; }
+    const askDate = needing[0].calendarDate ?? date;
+    const askDaysAgo = backfillQ.data?.days.find((d) => d.date === askDate)?.daysAgo ?? daysAgoOfDate;
     setReasonAsk({
-      title: `소급 사유 — ${date} (${daysAgoOfDate}일 전)`,
+      title: `소급 사유 — ${askDate} (${askDaysAgo}일 전)`,
       message,
       onSubmit: (reason) => { setReasonAsk(null); action(reason); },
     });
@@ -296,18 +320,24 @@ export default function WorkboardScreen() {
     const schedules = [...real, ...virtual];
 
     const provisions = provisionsQ.data?.items ?? [];
-    const byScheduleId = new Map<string, ServiceProvision>();
+    // QA37 N01: day-keys가 도착하기 전(data 없음)에는 행의 달력 날짜를 모른다(null). 도착 후 규칙(nextDawn)이 없으면(구 서버) 종전대로 선택일.
+    const dayKeysReady = provisionsQ.data !== undefined;
+    const nextDawn = provisionsQ.data?.nextDawn ?? null;
+    const byScheduleId = new Map<string, ServiceProvision[]>();
     for (const p of provisions) {
-      if (p.scheduleId && !byScheduleId.has(p.scheduleId)) byScheduleId.set(p.scheduleId, p);
+      if (!p.scheduleId) continue;
+      const list = byScheduleId.get(p.scheduleId);
+      if (list) list.push(p); else byScheduleId.set(p.scheduleId, [p]);
     }
     const byStart = new Map<string, Row[]>();
     for (const s of schedules) {
       const start = s.plannedStart as string;
-      // 가상행은 서버에 id 가 없다 — note/시각으로 찾는다
+      const calendarDate = dayKeysReady ? calendarDateOfStart(date, s.plannedStart, nextDawn) : null;
+      // 가상행은 서버에 id 가 없다 — note/시각으로 찾는다. 제공일이 행의 달력 날짜와 같은 기록만(교차일 엇매칭 차단)
       const done = isVirtualSchedule(s)
-        ? findVirtualProvision(s, provisions, kstHHMM)
-        : byScheduleId.get(s.id) ?? null;
-      const row: Row = { schedule: s, done };
+        ? findVirtualProvision(s, provisions, kstHHMM, calendarDate)
+        : (byScheduleId.get(s.id) ?? []).find((p) => !calendarDate || !p.serviceDate || p.serviceDate === calendarDate) ?? null;
+      const row: Row = { schedule: s, done, calendarDate };
       byStart.set(start, [...(byStart.get(start) ?? []), row]);
     }
     return [...byStart.entries()]
@@ -316,7 +346,7 @@ export default function WorkboardScreen() {
         start,
         rows: rows.sort((a, b) => (a.schedule.residentName ?? '').localeCompare(b.schedule.residentName ?? '', 'ko')),
       }));
-  }, [schedulesQ.data, provisionsQ.data, residentsQ.data, facilityQ.data, todayDow]);
+  }, [schedulesQ.data, provisionsQ.data, residentsQ.data, facilityQ.data, todayDow, date]);
 
   // "지금" 블록 = 시작 시각이 지났고 다음 블록은 아직인 것 (없으면 첫 미래 블록)
   const nowMin = (() => { const d = new Date(Date.now() + 9 * 3600_000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
@@ -369,13 +399,14 @@ export default function WorkboardScreen() {
    * 계획 시각(HH:MM) → 선택일 KST ISO. 가상행 매칭 키다 — 시각이 없으면 오늘은 현재 시각, 지난 날짜는 그날 정오
    * (지난 날짜 기록의 startAt이 오늘 날짜로 남지 않게 — 기록은 선택한 그날의 기록이다, B-9).
    */
-  const plannedIso = (hhmm: string | null) => (hhmm ? `${date}T${hhmm}:00+09:00` : isToday ? nowIso() : `${date}T12:00:00+09:00`);
+  const plannedIso = (hhmm: string | null, calendarDate: string) => (hhmm ? `${calendarDate}T${hhmm}:00+09:00` : isToday ? nowIso() : `${calendarDate}T12:00:00+09:00`);
   /**
    * 기록 startAt 규약 1곳 — 오늘 실계획은 '기록한 실제 시각'(기존 동작), 가상행은 계획 시각.
    * 지난 날짜(소급)는 실제 시각이 의미 없으니(오늘 시각이 그날 기록에 붙는다) 실·가상 모두 계획 시각을 쓴다.
    */
-  const startAtFor = (schedule: ServiceSchedule, virtual: boolean) =>
-    (virtual || !isToday ? plannedIso(schedule.plannedStart) : nowIso());
+  // QA37 N01: 계획 시각은 선택일이 아니라 행의 실제 달력 날짜(row.calendarDate) 위에 얹는다 — '익일 새벽 04:30'이 그날 새벽 시각으로 저장되지 않게.
+  const startAtFor = (schedule: ServiceSchedule, virtual: boolean, calendarDate: string) =>
+    (virtual || !isToday ? plannedIso(schedule.plannedStart, calendarDate) : nowIso());
 
   const record = (
     row: Row,
@@ -388,10 +419,21 @@ export default function WorkboardScreen() {
       RNAlert.alert('이미 기록됨', `${row.done.staffName ?? '다른 직원'}님이 이미 기록했습니다.`);
       return;
     }
-    if (dayLocked) return; // 잠금일(D-11·월마감) — 버튼도 비활성이지만 방어(서버도 422로 막는다)
+    if (row.calendarDate == null) {
+      // 기록 날짜 규칙(day-keys nextDawn)을 아직 못 받았다 — 날짜를 지어내지 않고 막는다(받는 즉시 풀린다)
+      RNAlert.alert('기록을 불러오는 중', '오늘 기록 정보를 아직 받지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
+      return;
+    }
+    if (isFutureCalendarDate(row.calendarDate, today)) {
+      // 오늘 화면의 '익일 새벽' 행 = 내일 날짜 — 미래 기록 금지(서버도 422)
+      RNAlert.alert('기록할 수 없음', FUTURE_ROW_NOTICE);
+      return;
+    }
+    if (rowBlocked(row)) return; // 잠금일(D-11·월마감) — 버튼도 비활성이지만 방어(서버도 422로 막는다)
     // B-9: D-2 이상은 사유를 먼저 받는다(취소하면 저장하지 않음). 그 외 날짜는 바로 저장.
     withReason(
       `${row.schedule.residentName ?? ''} — ${serviceTypeLabel(row.schedule.serviceType)}(${row.schedule.plannedStart ?? '시각 미정'})을(를) 지난 날짜에 기록합니다. 소급 사유를 적어 주세요.`,
+      [row],
       (reason) => recordNow(row, note, detail, onDone, selection, reason),
     );
   };
@@ -408,17 +450,18 @@ export default function WorkboardScreen() {
     // 가상행(시설 일과표 파생)은 서버에 계획 id 가 없다 — scheduleId 대신 일과 내용을 note 로 보낸다.
     // 없는 id 를 보내면 서버가 404/무결성 오류를 내거나, 더 나쁘게는 남의 계획에 붙는다.
     const virtual = isVirtualSchedule(row.schedule);
+    const calendarDate = row.calendarDate ?? date; // record()가 null을 이미 막았다 — 타입 좁히기용
     createProvision(
       {
         residentId: row.schedule.residentId,
         serviceType: row.schedule.serviceType,
-        serviceDate: date,
+        serviceDate: calendarDate, // QA37 N01: 행의 실제 달력 날짜(익일 새벽 행 = 선택일 다음 날)
         // ⚠ 실계획은 scheduleId 로 되찾으므로 '기록한 실제 시각'을 남긴다(기존 동작 — 오늘 기록).
         //   가상행은 되찾을 id 가 없어 (note + 계획 시각)으로 매칭한다 — 그래서 계획 시각을 넣는다.
         //   웹 ServiceTodoList 도 같은 규약이다(H8: 슬롯 판정은 계획 시각 기준).
         //   여기에 실제 시각을 넣으면 체크해도 완료로 안 보인다 — 실제로 밟을 뻔한 함정.
         //   지난 날짜(소급)는 startAtFor가 계획 시각을 쓴다(오늘 시각이 그날 기록에 붙지 않게).
-        startAt: startAtFor(row.schedule, virtual),
+        startAt: startAtFor(row.schedule, virtual, calendarDate),
         ...(virtual ? {} : { scheduleId: row.schedule.id }),
         staffId,
         source: 'manual',
@@ -543,11 +586,12 @@ export default function WorkboardScreen() {
       setSavingIds((prev) => new Set(prev).add(r.schedule.id));
       try {
         const virtual = isVirtualSchedule(r.schedule); // 가상행은 scheduleId 대신 note (record()와 동일 규약)
+        const calendarDate = r.calendarDate ?? date; // 일괄 대상은 calendarDate가 있는 행만(isBulkEligible)
         await createProvisionAsync({
           residentId: r.schedule.residentId,
           serviceType: r.schedule.serviceType,
-          serviceDate: date,
-          startAt: startAtFor(r.schedule, virtual), // record()와 동일 규약
+          serviceDate: calendarDate,
+          startAt: startAtFor(r.schedule, virtual, calendarDate), // record()와 동일 규약
           ...(virtual ? {} : { scheduleId: r.schedule.id }),
           staffId,
           source: 'manual',
@@ -591,11 +635,12 @@ export default function WorkboardScreen() {
     try {
       const items: BulkCreateItem[] = eligible.map((r) => {
         const virtual = isVirtualSchedule(r.schedule);
+        const calendarDate = r.calendarDate ?? date; // 일괄 대상은 calendarDate가 있는 행만(isBulkEligible)
         return {
           residentId: r.schedule.residentId,
           serviceType: r.schedule.serviceType,
-          serviceDate: date,
-          startAt: startAtFor(r.schedule, virtual),
+          serviceDate: calendarDate,
+          startAt: startAtFor(r.schedule, virtual, calendarDate),
           ...(virtual ? {} : { scheduleId: r.schedule.id }),
           staffId: staffId ?? '',
           source: 'manual' as const,
@@ -629,17 +674,19 @@ export default function WorkboardScreen() {
   /** 블록 헤더 [남은 N건 모두 완료] 탭 — H-8①②③, 확인창 없이 즉시 낙관 체크 + 5초 되돌리기. */
   const startBulkComplete = (block: Block) => {
     if (dayLocked) return; // 잠금일 — 버튼도 렌더하지 않지만 방어
-    const eligibleNow = block.rows.filter((r) => !r.done).filter(isBulkEligible);
+    // QA37 N01: 내일 날짜 행(오늘 화면의 '익일 새벽')은 일괄 완료 대상에서 제외한다
+    const eligibleNow = block.rows.filter((r) => !r.done).filter(isBulkEligible).filter((r) => !rowBlocked(r));
     if (eligibleNow.length === 0) return;
     // B-9: D-2 이상은 사유를 1번만 받고(모달) 그 사유로 카운트다운·전송을 진행한다. 취소하면 아무것도 체크하지 않는다.
     withReason(
       `${block.start} 시간대의 남은 ${eligibleNow.length}건을 ${date} 소급 기록으로 모두 완료합니다. 사유를 한 번 적으면 전부에 적용됩니다.`,
+      eligibleNow,
       (reason) => startBulkCompleteNow(block, reason),
     );
   };
   const startBulkCompleteNow = (block: Block, reason?: string) => {
-    const remaining = block.rows.filter((r) => !r.done);
-    const eligible = remaining.filter(isBulkEligible);
+    const remaining = block.rows.filter((r) => !r.done && !isFutureCalendarDate(r.calendarDate, today));
+    const eligible = remaining.filter(isBulkEligible).filter((r) => !rowBlocked(r));
     if (eligible.length === 0) return;
     clearBulkTimer(); // 단순화 — 한 번에 한 블록만 진행(현장은 순서대로 처리)
     const excludedCount = remaining.length - eligible.length;
@@ -694,7 +741,8 @@ export default function WorkboardScreen() {
     const out: { row: Row; blockStart: string }[] = [];
     for (let i = 0; i < currentIdx; i++) {
       for (const r of blocks[i].rows) {
-        if (!r.done) out.push({ row: r, blockStart: blocks[i].start });
+        // QA37 N01: 오늘 화면의 '익일 새벽' 행(내일 날짜)은 '놓친 일'이 아니다 — 이월 구획에서 뺀다
+        if (!r.done && !isFutureCalendarDate(r.calendarDate, today)) out.push({ row: r, blockStart: blocks[i].start });
       }
     }
     return out;
@@ -822,6 +870,8 @@ export default function WorkboardScreen() {
     const isBulkFailed = !done && !!bulkFailed[blockStart]?.has(row.schedule.id);
     // 같은 행이 이월 구획과 (전체 보기의) 블록에 두 번 그려질 수 있다 — 딥링크가 고른 쪽에만 강조·ref.
     const isHighlighted = highlightRowKey === row.schedule.id && highlightInOverdue === !!opts?.inOverdue;
+    // QA37 N01: 오늘 화면의 '익일 새벽' 행 = 내일 날짜 — 체크 불가 + 안내 문구
+    const futureRow = !done && isFutureCalendarDate(row.calendarDate, today);
     return (
       <View key={row.schedule.id} style={st.rowWrap} ref={isHighlighted ? highlightRowRef : undefined}>
         <TouchableOpacity
@@ -834,7 +884,7 @@ export default function WorkboardScreen() {
               : null,
             isHighlighted && st.rowHighlight,
           ]}
-          disabled={saving || undoing || isQueued || isBulkChecked || (dayLocked && !done)}
+          disabled={saving || undoing || isQueued || isBulkChecked || (!done && rowBlocked(row))}
           onPress={() => (done
             ? RNAlert.alert(
                 isException ? '예외로 기록됨' : '이미 기록됨',
@@ -867,6 +917,7 @@ export default function WorkboardScreen() {
             )}
             {/* ⑤ 대기 중은 체크가 아니다 — 회색 라벨로만 알린다 */}
             {isQueued && <Text style={st.queuedTag}>대기 중 — 전파가 돌아오면 자동 전송됩니다</Text>}
+            {futureRow && <Text style={st.queuedTag}>{FUTURE_ROW_NOTICE}</Text>}
             {isBulkFailed && <Text style={st.bulkFailedTag}>일괄 저장 실패 — 다시 눌러 개별 기록하세요</Text>}
           </View>
           {(saving || undoing) && <ActivityIndicator size="small" color={COLOR.primary} />}
@@ -877,6 +928,7 @@ export default function WorkboardScreen() {
           <RowActionButton
             variant="accent"
             label={detailButtonLabelFor(row.schedule.serviceType)}
+            disabled={rowBlocked(row)}
             onPress={() => {
               // 실증 측정 — 상세 시트 열기도 "행 상세 열기"로 센다.
               measure.step('workboard:row');
@@ -1047,8 +1099,9 @@ export default function WorkboardScreen() {
           const isExpanded = showAll || isCurrent || block.start === forcedExpandedBlock;
           const doneCount = block.rows.filter((r) => r.done && !isExceptionRecord(r.done)).length;
           const exceptionCount = block.rows.filter((r) => isExceptionRecord(r.done)).length;
-          const remainingRows = block.rows.filter((r) => !r.done);
-          const eligibleRows = remainingRows.filter(isBulkEligible);
+          // QA37 N01: 내일 날짜 행(오늘 화면의 '익일 새벽')은 '남은 N건'·'제외 n건'에 세지 않는다 — 같은 판정 isFutureCalendarDate
+          const remainingRows = block.rows.filter((r) => !r.done && !isFutureCalendarDate(r.calendarDate, today));
+          const eligibleRows = remainingRows.filter(isBulkEligible).filter((r) => !rowBlocked(r));
           const excludedCount = remainingRows.length - eligibleRows.length;
           const flow = bulkFlow[block.start];
           const showExcludedTag = (flow ? flow.excluded : excludedCount) > 0;
