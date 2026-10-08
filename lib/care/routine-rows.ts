@@ -100,13 +100,19 @@ export function buildRoutineSchedules(args: {
  *   오전·오후에 각각) note 만으로 찾으면 **먼저 나온 기록이 뒤 시각 행에도 완료로 붙는다.**
  *   하지도 않은 일이 완료로 보이는 건 이 프로젝트에서 가장 하면 안 되는 종류의 버그다.
  * ⚠ ③이 필요한 이유: 예외 기록(거부하심 등)은 note 가 예외 문구로 덮여 ①②가 깨진다.
+ *
+ * calendarDate(QA37 N01, 26차-a-h R3): 이 행의 실제 달력 날짜 — 주면 제공일(serviceDate)이 같은 기록만 후보로 삼는다
+ * (오늘 화면에 같이 읽힌 '오늘 04:30(어제 화면 체크분)'이 오늘 화면 '익일 새벽(내일) 04:30' 행에 엇매칭되지 않게). 기록에 serviceDate가 없으면(구 서버) 종전 동작.
  */
 export function findVirtualProvision(
   schedule: ServiceSchedule,
   provisions: ServiceProvision[],
   kstHHMM: (iso: string | null) => string | null,
+  calendarDate?: string | null,
 ): ServiceProvision | null {
-  const mine = provisions.filter((p) => !p.scheduleId && p.residentId === schedule.residentId);
+  const mine = provisions.filter((p) =>
+    !p.scheduleId && p.residentId === schedule.residentId
+    && (!calendarDate || !p.serviceDate || p.serviceDate === calendarDate));
   const atPlanned = (p: ServiceProvision) =>
     schedule.plannedStart != null && kstHHMM(p.startAt ?? null) === schedule.plannedStart;
   // 소급 저장분(B-9)은 note 앞에 `[소급: 사유]`가 붙는다 — 접두를 걷고 비교한다(같은 일과 행으로 읽히게)
